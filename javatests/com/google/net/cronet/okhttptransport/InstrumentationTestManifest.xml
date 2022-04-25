@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.google.net.cronet.okhttptransport">
+
+  <uses-sdk android:minSdkVersion="19" android:targetSdkVersion="28" />
+
+  <application>
+    <uses-library android:name="android.test.runner" />
+  </application>
+
+  <instrumentation
+      android:name="androidx.test.runner.AndroidJUnitRunner"
+      android:targetPackage="com.google.net.cronet.testing.testapp" />
+
+</manifest>
