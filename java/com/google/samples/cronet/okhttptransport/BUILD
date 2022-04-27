@@ -10,7 +10,6 @@ android_binary(
     resource_files = glob(["res/**"]),
     deps = [
         "//:okhttp_cronet_transport",
-        "//third_party/java/androidx/appcompat",
         "@maven//:com_google_android_gms_play_services_cronet",
         "@maven//:com_google_android_gms_play_services_tasks",
         "@maven//:com_google_code_findbugs_jsr305",

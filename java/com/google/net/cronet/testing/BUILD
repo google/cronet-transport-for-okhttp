@@ -11,7 +11,6 @@ android_library(
     ],
     deps = [
         "//java/com/google/net/cronet/testing/testapp:embedded_cronet_test_app_lib",
-        "//third_party/java/android_libs/cronet:cronet_api",
         "@maven//:androidx_annotation_annotation",
         "@maven//:androidx_test_core",
         "@maven//:androidx_test_ext_junit",

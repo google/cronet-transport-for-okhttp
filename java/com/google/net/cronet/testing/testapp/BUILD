@@ -14,7 +14,7 @@ android_library(
     testonly = 1,
     srcs = glob(["*.java"]),
     deps = [
-        "//third_party/java/android_libs/cronet:cronet_pure_api_compiletime",
+        "@maven//:org_chromium_net_cronet_api",
         "@maven//:org_chromium_net_cronet_embedded",
     ],
 )

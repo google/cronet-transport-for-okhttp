@@ -1,4 +1,5 @@
 load("@build_bazel_rules_android//android:rules.bzl", "android_library")
+load("//devtools/copybara/rules:copybara.bzl", "copybara_config_test")
 
 licenses(["notice"])
 
@@ -10,4 +11,9 @@ android_library(
     exports = [
         "//java/com/google/net/cronet/okhttptransport:okhttp_cronet_transport",
     ],
+)
+
+copybara_config_test(
+    name = "copybara_config_test",
+    config = "copy.bara.sky",
 )

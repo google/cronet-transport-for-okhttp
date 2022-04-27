@@ -23,9 +23,11 @@ maven_install(
     artifacts = [
         # OkHttp
         "com.squareup.okhttp3:okhttp:3.12.13",
+        "com.squareup.okhttp3:mockwebserver:3.12.13",
         "com.squareup.okio:okio:2.10.0",
-        # Cronet APIs
+        # Cronet
         "org.chromium.net:cronet-api:98.4758.101",
+        "org.chromium.net:cronet-embedded:98.4758.101",
         # Implementation dependencies
         "com.google.guava:guava:31.1-android",
         "com.google.code.findbugs:jsr305:3.0.2",
@@ -33,7 +35,14 @@ maven_install(
         # Testing
         "org.robolectric:robolectric:4.7.3",
         "com.google.truth:truth:1.1.3",
+        "androidx.annotation:annotation:1.3.0",
+        "androidx.test:core:1.3.0",
         "androidx.test.ext:junit:1.1.1",
+        "androidx.test:runner:1.4.0",
+        "junit:junit:4.13.2",
+        # Sample app dependencies
+        "com.google.android.gms:play-services-tasks:18.0.1",
+        "com.google.android.gms:play-services-cronet:18.0.1",
     ],
     repositories = [
         "https://maven.google.com",
@@ -54,3 +63,12 @@ android_sdk_repository(
     api_level = 32,
     build_tools_version = "30.0.2"
 )
+
+ATS_TAG = "master"
+http_archive(
+    name = "android_test_support",
+    strip_prefix = "android-test-%s" % ATS_TAG,
+    urls = ["https://github.com/android/android-test/archive/refs/heads/master.zip"],
+)
+load("@android_test_support//:repo.bzl", "android_test_repositories")
+android_test_repositories()
