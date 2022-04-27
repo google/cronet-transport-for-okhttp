@@ -8,7 +8,6 @@ android_library(
     srcs = glob(["*.java"]),
     visibility = ["//javatests:__subpackages__"],
     deps = [
-        "//java/com/google/testing/mockito:mockito-android",
         "//third_party/java/android_libs/cronet:cronet_pure_api_compiletime",
         "@maven//:androidx_annotation_annotation",
         "@maven//:androidx_test_core",

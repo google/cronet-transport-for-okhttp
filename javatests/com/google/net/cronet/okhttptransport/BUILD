@@ -50,8 +50,6 @@ android_local_test(
     manifest = "LocalTestManifest.xml",
     deps = [
         "//:okhttp_cronet_transport",
-        "//java/com/google/testing/mockito:mockito-android",
-        "//third_party/java/mockito:mockito-android",
         "@maven//:androidx_test_ext_junit",
         "@maven//:com_google_guava_guava",
         "@maven//:com_google_truth_truth",
@@ -70,7 +68,6 @@ android_library(
     deps = [
         "//:okhttp_cronet_transport",
         "//java/com/google/net/cronet/testing:cronet_engine_test_app_rule",
-        "//java/com/google/testing/mockito:mockito-android",
         "//third_party/java/android_libs/cronet:cronet_pure_api_compiletime",
         "@maven//:androidx_test_core",
         "@maven//:androidx_test_ext_junit",
@@ -110,7 +107,6 @@ android_library(
     deps = [
         "//:okhttp_cronet_transport",
         "//java/com/google/net/cronet/testing:cronet_engine_test_app_rule",
-        "//java/com/google/testing/mockito:mockito-android",
         "//third_party/java/android_libs/cronet:cronet_pure_api_compiletime",
         "//third_party/okhttp_tests/javatests/okhttp3:call_test_lib",
         "@maven//:androidx_annotation_annotation",
