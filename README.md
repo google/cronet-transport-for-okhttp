@@ -94,6 +94,8 @@ list of limitations and features that are not provided by the bridge:
     on the Cronet engine or built on top of this library.
   - It's not possible to set multiple values for a single header key in outgoing
     requests, Cronet uses the last value provided.
+  - `Accept-Encoding` are automatically populated by Cronet based on the engine
+    configuration. Custom values are ignored.
   - The `Response` object doesn't have the following fields set:
     - `handshake`
     - `priorResponse`
