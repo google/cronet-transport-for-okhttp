@@ -223,7 +223,7 @@ public class ResponseConverterTest {
 
       multimap.put("cache-control", "private, max-age=0");
       multimap.put("content-type", "text/html; charset=UTF-8");
-      multimap.put("content-encoding", "gzip");
+      multimap.put("content-encoding", "encoding-not-handled-by-cronet");
       multimap.put("content-length", String.valueOf(GOOGLE_COM_BODY.length()));
       multimap.put("x-random-header", "FooBar");
 

@@ -34,7 +34,7 @@ public final class MainActivity extends Activity {
   }
 
   private void initCronetEngine() {
-    cronetEngine = new CronetEngine.Builder(this).enableQuic(true).build();
+    cronetEngine = new CronetEngine.Builder(this).enableQuic(true).enableBrotli(true).build();
   }
 
   public CronetEngine getCronetEngine() {

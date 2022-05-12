@@ -24,6 +24,7 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.fail;
 
+import android.util.Base64;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Range;
 import java.io.FileNotFoundException;
@@ -43,6 +44,7 @@ import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.zip.Deflater;
 import javax.annotation.Nullable;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
@@ -51,8 +53,10 @@ import okhttp3.mockwebserver.SocketPolicy;
 import okio.Buffer;
 import okio.BufferedSink;
 import okio.BufferedSource;
+import okio.DeflaterSink;
 import okio.GzipSink;
 import okio.Okio;
+import okio.Sink;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Rule;
@@ -1172,9 +1176,6 @@ public abstract class CallTest {
   }
 
   @Test
-  @Ignore(
-      "Need to figure out a consistent strategy for encodings that are automatically processed "
-          + "by Cronet")
   public void gzip() throws Exception {
     Buffer gzippedBody = gzipped("abcabcabc");
 
@@ -1189,6 +1190,117 @@ public abstract class CallTest {
         .assertHeader("Content-Encoding")
         .assertHeader("Content-Length")
         .assertBody("abcabcabc");
+  }
+
+  @Test
+  public void brotli() throws Exception {
+    String body = "abcabcabc";
+    Buffer brotliedBody =
+        new Buffer().write(Base64.decode("GwgA+CXDxMaCkyBAAw==\n", Base64.DEFAULT));
+
+    server.enqueue(new MockResponse().setBody(brotliedBody).addHeader("Content-Encoding: br"));
+
+    // Confirm that the user request doesn't have Accept-Encoding, and the user
+    // response doesn't have a Content-Encoding or Content-Length.
+    RecordedResponse userResponse = executeSynchronously("/");
+    userResponse
+        .assertCode(200)
+        .assertRequestHeader("Accept-Encoding")
+        .assertHeader("Content-Encoding")
+        .assertHeader("Content-Length")
+        .assertBody(body);
+  }
+
+  @Test
+  public void brotliThenGzip_asOneFlag() throws Exception {
+    String body = "abcabcabc";
+    Buffer brotliedBody =
+        new Buffer().write(Base64.decode("GwgA+CXDxMaCkyBAAw==\n", Base64.DEFAULT));
+
+    server.enqueue(
+        new MockResponse().setBody(gzipped(brotliedBody)).addHeader("Content-Encoding: br, gzip"));
+
+    // Confirm that the user request doesn't have Accept-Encoding, and the user
+    // response doesn't have a Content-Encoding or Content-Length.
+    RecordedResponse userResponse = executeSynchronously("/");
+    userResponse
+        .assertCode(200)
+        .assertRequestHeader("Accept-Encoding")
+        .assertHeader("Content-Encoding")
+        .assertHeader("Content-Length")
+        .assertBody(body);
+  }
+
+  @Test
+  public void brotliThenGzip_repeatedFlag() throws Exception {
+    String body = "abcabcabc";
+    Buffer brotliedBody =
+        new Buffer().write(Base64.decode("GwgA+CXDxMaCkyBAAw==\n", Base64.DEFAULT));
+
+    server.enqueue(
+        new MockResponse()
+            .setBody(gzipped(brotliedBody))
+            .addHeader("Content-Encoding: br")
+            .addHeader("Content-Encoding: gzip"));
+
+    // Confirm that the user request doesn't have Accept-Encoding, and the user
+    // response doesn't have a Content-Encoding or Content-Length.
+    RecordedResponse userResponse = executeSynchronously("/");
+    userResponse
+        .assertCode(200)
+        .assertRequestHeader("Accept-Encoding")
+        .assertHeader("Content-Encoding")
+        .assertHeader("Content-Length")
+        .assertBody(body);
+  }
+
+  @Test
+  public void deflate() throws Exception {
+    server.enqueue(
+        new MockResponse().setBody(deflated("abcabcabc")).addHeader("Content-Encoding: deflate"));
+
+    // Confirm that the user request doesn't have Accept-Encoding, and the user
+    // response doesn't have a Content-Encoding or Content-Length.
+    RecordedResponse userResponse = executeSynchronously("/");
+    userResponse
+        .assertCode(200)
+        .assertRequestHeader("Accept-Encoding")
+        .assertHeader("Content-Encoding")
+        .assertHeader("Content-Length")
+        .assertBody("abcabcabc");
+  }
+
+  @Test
+  public void customEncoding() throws Exception {
+    String body = "abcabcabc";
+
+    server.enqueue(new MockResponse().setBody(body).addHeader("Content-Encoding: custom-encoding"));
+
+    // Confirm that the user has both Content-Encoding and Content-Length.
+    RecordedResponse userResponse = executeSynchronously("/");
+    userResponse
+        .assertCode(200)
+        .assertHeader("Content-Encoding", "custom-encoding")
+        .assertHeader("Content-Length", String.valueOf(body.length()))
+        .assertBody(body);
+  }
+
+  @Test
+  public void encodingChainWithCustom() throws Exception {
+    String body = "abcabcabc";
+
+    server.enqueue(
+        new MockResponse().setBody(body).addHeader("Content-Encoding: br, custom-encoding, gzip"));
+
+    // Cronet doesn't know how to decode "custom-encoding" so it sends the response body down
+    // verbatim.
+    RecordedResponse userResponse = executeSynchronously("/");
+    userResponse
+        .assertCode(200)
+        .assertRequestHeader("Accept-Encoding")
+        .assertHeader("Content-Encoding", "br, custom-encoding, gzip")
+        .assertHeader("Content-Length", "9")
+        .assertBody(body);
   }
 
   @Test
@@ -1602,9 +1714,23 @@ public abstract class CallTest {
     }
   }
 
-  Buffer gzipped(String data) throws IOException {
+  Buffer gzipped(Buffer data) throws IOException {
     Buffer result = new Buffer();
     BufferedSink sink = Okio.buffer(new GzipSink(result));
+    sink.writeAll(data);
+    sink.close();
+    return result;
+  }
+
+  Buffer gzipped(String stringData) throws IOException {
+    Buffer data = new Buffer();
+    data.writeUtf8(stringData);
+    return gzipped(data);
+  }
+
+  Buffer deflated(String data) throws IOException {
+    Buffer result = new Buffer();
+    BufferedSink sink = Okio.buffer(new DeflaterSink((Sink) result, new Deflater()));
     sink.writeUtf8(data);
     sink.close();
     return result;

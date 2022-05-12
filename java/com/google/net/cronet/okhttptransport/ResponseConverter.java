@@ -16,6 +16,12 @@
 
 package com.google.net.cronet.okhttptransport;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+
+import androidx.annotation.NonNull;
+import com.google.common.base.Ascii;
+import com.google.common.base.Splitter;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -23,6 +29,8 @@ import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.Uninterruptibles;
 import java.io.IOException;
 import java.net.ProtocolException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -44,6 +52,13 @@ import org.chromium.net.UrlResponseInfo;
 final class ResponseConverter {
   private static final String CONTENT_LENGTH_HEADER_NAME = "Content-Length";
   private static final String CONTENT_TYPE_HEADER_NAME = "Content-Type";
+  private static final String CONTENT_ENCODING_HEADER_NAME = "Content-Encoding";
+
+  // https://source.chromium.org/search?q=symbol:FilterSourceStream::ParseEncodingType%20f:cc
+  private static final ImmutableSet<String> ENCODINGS_HANDLED_BY_CRONET =
+      ImmutableSet.of("br", "deflate", "gzip", "x-gzip");
+
+  private static final Splitter COMMA_SPLITTER = Splitter.on(',').trimResults().omitEmptyStrings();
 
   /**
    * Creates an OkHttp's Response from the OkHttp-Cronet bridging callback.
@@ -57,16 +72,61 @@ final class ResponseConverter {
 
     UrlResponseInfo urlResponseInfo = getFutureValue(callback.getUrlResponseInfo());
 
+    @Nullable String contentType = getLastHeaderValue(CONTENT_TYPE_HEADER_NAME, urlResponseInfo);
+
+    // If all content encodings are those known to Cronet natively, Cronet decodes the body stream.
+    // Otherwise, it's sent to the callbacks verbatim. For consistency with OkHttp, we only leave
+    // the Content-Encoding headers if Cronet didn't decode the request. Similarly, for consistency,
+    // we strip the Content-Length header of decoded responses.
+
+    @Nullable String contentLengthString = null;
+
+    // Theoretically, the content encodings can be scattered across multiple comma separated
+    // Content-Encoding headers. This list contains individual encodings.
+    List<String> contentEncodingItems = new ArrayList<>();
+
+    for (String contentEncodingHeaderValue :
+        getOrDefault(
+            urlResponseInfo.getAllHeaders(),
+            CONTENT_ENCODING_HEADER_NAME,
+            Collections.emptyList())) {
+      Iterables.addAll(contentEncodingItems, COMMA_SPLITTER.split(contentEncodingHeaderValue));
+    }
+
+    boolean keepEncodingAffectedHeaders =
+        contentEncodingItems.isEmpty()
+            || !ENCODINGS_HANDLED_BY_CRONET.containsAll(contentEncodingItems);
+
+    if (keepEncodingAffectedHeaders) {
+      contentLengthString = getLastHeaderValue(CONTENT_LENGTH_HEADER_NAME, urlResponseInfo);
+    }
+
+    ResponseBody responseBody =
+        createResponseBody(
+            request,
+            urlResponseInfo.getHttpStatusCode(),
+            contentType,
+            contentLengthString,
+            getFutureValue(callback.getBodySource()));
+
     responseBuilder
         .request(request)
         .code(urlResponseInfo.getHttpStatusCode())
         .message(urlResponseInfo.getHttpStatusText())
         .protocol(convertProtocol(urlResponseInfo.getNegotiatedProtocol()))
-        .body(createResponseBody(request, callback));
+        .body(responseBody);
 
     for (Map.Entry<String, String> header : urlResponseInfo.getAllHeadersAsList()) {
-      // TODO(danstahr): Don't propagate content encodings handled by Cronet
-      responseBuilder.addHeader(header.getKey(), header.getValue());
+      boolean copyHeader = true;
+      if (!keepEncodingAffectedHeaders) {
+        if (Ascii.equalsIgnoreCase(header.getKey(), CONTENT_LENGTH_HEADER_NAME)
+            || Ascii.equalsIgnoreCase(header.getKey(), CONTENT_ENCODING_HEADER_NAME)) {
+          copyHeader = false;
+        }
+      }
+      if (copyHeader) {
+        responseBuilder.addHeader(header.getKey(), header.getValue());
+      }
     }
 
     return responseBuilder.build();
@@ -86,13 +146,13 @@ final class ResponseConverter {
    * {@link ResponseBody} methods might block further to fetch parts of the body.
    */
   private static ResponseBody createResponseBody(
-      Request request, OkHttpBridgeRequestCallback callback) throws IOException {
-    UrlResponseInfo responseInfo = getFutureValue(callback.getUrlResponseInfo());
-    Source bodySource = getFutureValue(callback.getBodySource());
+      Request request,
+      int httpStatusCode,
+      @Nullable String contentType,
+      @Nullable String contentLengthString,
+      Source bodySource)
+      throws IOException {
 
-    @Nullable String contentType = getLastHeaderValue(CONTENT_TYPE_HEADER_NAME, responseInfo);
-    @Nullable
-    String contentLengthString = getLastHeaderValue(CONTENT_LENGTH_HEADER_NAME, responseInfo);
     long contentLength;
 
     // Ignore content-length header for HEAD requests (consistency with OkHttp)
@@ -108,10 +168,9 @@ final class ResponseConverter {
     }
 
     // Check for absence of body in No Content / Reset Content responses (OkHttp consistency)
-    int code = responseInfo.getHttpStatusCode();
-    if ((code == 204 || code == 205) && contentLength > 0) {
+    if ((httpStatusCode == 204 || httpStatusCode == 205) && contentLength > 0) {
       throw new ProtocolException(
-          "HTTP " + code + " had non-zero Content-Length: " + contentLengthString);
+          "HTTP " + httpStatusCode + " had non-zero Content-Length: " + contentLengthString);
     }
 
     return ResponseBody.create(
@@ -155,6 +214,15 @@ final class ResponseConverter {
       return Uninterruptibles.getUninterruptibly(future);
     } catch (ExecutionException e) {
       throw new IOException(e);
+    }
+  }
+
+  private static <K, V> V getOrDefault(Map<K, V> map, K key, @NonNull V defaultValue) {
+    V value = map.get(key);
+    if (value == null) {
+      return checkNotNull(defaultValue);
+    } else {
+      return value;
     }
   }
 }

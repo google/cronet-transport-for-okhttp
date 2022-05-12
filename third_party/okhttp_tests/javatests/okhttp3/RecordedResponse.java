@@ -122,7 +122,7 @@ public final class RecordedResponse {
     return new RecordedResponse(cacheResponse.request(), cacheResponse, null, null, null);
   }
 
-  public RecordedResponse assertFailure(Class<?>... allowedExceptionTypes) {
+  public RecordedResponse assertFailure(Class<? extends Throwable>... allowedExceptionTypes) {
     assertWithMessage(
             "Expected exception type among "
                 + Arrays.toString(allowedExceptionTypes)
