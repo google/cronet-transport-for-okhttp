@@ -24,7 +24,6 @@ android_library(
     ],
     deps = [
         ":okhttp_cronet_transport_compile_only_deps",
-        "//third_party/java/androidx/core",
         "@maven//:androidx_annotation_annotation",
         "@maven//:com_google_code_findbugs_jsr305",
         "@maven//:com_google_guava_guava",
