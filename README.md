@@ -4,7 +4,20 @@ This package allows OkHttp and Retrofit users to use Cronet as their transport
 layer, benefiting from features like QUIC/HTTP3 support and connection
 migration.
 
-## Getting started
+## Installation
+
+The easiest way to import this library is to include it as a Gradle dependency
+in your app's `build.gradle` file. Simply add the following line and specify
+the desired version.
+
+```
+implementation 'com.google.net.cronet:cronet-okhttp:VERSION'
+```
+
+You can also build the library from source. For information how to do that,
+see [CONTRIBUTING.md].
+
+## First steps
 
 There are two ways to use this library — either as an OkHttp application
 interceptor, or as a `Call` factory.
