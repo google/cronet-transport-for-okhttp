@@ -98,13 +98,13 @@ final class RequestResponseConverter {
       }
 
       if (body.contentLength() != 0) {
-        if (okHttpRequest.header(CONTENT_TYPE_HEADER_NAME) == null && body.contentType() != null) {
+        if (body.contentType() != null) {
           builder.addHeader(CONTENT_TYPE_HEADER_NAME, body.contentType().toString());
-        } else {
+        } else if (okHttpRequest.header(CONTENT_TYPE_HEADER_NAME) == null) {
           // Cronet always requires content-type to be present when a body is present. Use a generic
           // value if one isn't provided.
           builder.addHeader(CONTENT_TYPE_HEADER_NAME, CONTENT_TYPE_HEADER_DEFAULT_VALUE);
-        }
+        } // else use the header
 
         builder.setUploadDataProvider(
             requestBodyConverter.convertRequestBody(body, writeTimeoutMillis),

@@ -46,6 +46,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.Deflater;
 import javax.annotation.Nullable;
+import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
@@ -269,6 +270,56 @@ public abstract class CallTest {
     assertThat(recordedRequest.getBody().size()).isEqualTo(0);
     assertThat(recordedRequest.getHeader("Content-Length")).isEqualTo("0");
     assertThat(recordedRequest.getHeader("Content-Type")).isNull();
+  }
+
+  @Test
+  public void postWithoutContentType() throws Exception {
+    server.setDispatcher(createEchoDispatcher());
+
+    Request request =
+        new Request.Builder().url(server.url("/")).post(RequestBody.create(null, "{}")).build();
+
+    // Cronet adds a default content type
+    executeSynchronously(request)
+        .assertCode(200)
+        .assertBody("{}")
+        .assertHeader("Content-Type", "application/octet-stream");
+  }
+
+  @Test
+  public void postWithCustomContentTypeHeader() throws Exception {
+    server.setDispatcher(createEchoDispatcher());
+
+    Request request =
+        new Request.Builder()
+            .url(server.url("/"))
+            .header("Content-Type", "foo/bar")
+            .post(RequestBody.create(null, "{}"))
+            .build();
+
+    // The Content-Type header is preserved
+    executeSynchronously(request)
+        .assertCode(200)
+        .assertBody("{}")
+        .assertHeader("Content-Type", "foo/bar");
+  }
+
+  @Test
+  public void postWithContentTypeSetInHeaderAndMediaType() throws Exception {
+    server.setDispatcher(createEchoDispatcher());
+
+    Request request =
+        new Request.Builder()
+            .url(server.url("/"))
+            .post(RequestBody.create(MediaType.parse("application/json"), "{}"))
+            .header("Content-Type", "foo/bar")
+            .build();
+
+    // The media type content type gets precedence
+    executeSynchronously(request)
+        .assertCode(200)
+        .assertBody("{}")
+        .assertHeader("Content-Type", "application/json; charset=utf-8");
   }
 
   @Test
@@ -1751,5 +1802,17 @@ public abstract class CallTest {
         };
     thread.start();
     return thread;
+  }
+
+  private static Dispatcher createEchoDispatcher() {
+    return new Dispatcher() {
+      @Override
+      public MockResponse dispatch(RecordedRequest request) {
+        return new MockResponse()
+            .setBody(request.getBody())
+            .addHeader("Content-Type", request.getHeader("Content-Type"));
+      }
+      ;
+    };
   }
 }
