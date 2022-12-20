@@ -103,8 +103,8 @@ list of limitations and features that are not provided by the bridge:
 
 ### Common incompatibilities
   - The entirety of OkHttp core is bypassed. This includes caching, retries,
-    and network interceptors. These features have to be enabled directly
-    on the Cronet engine or built on top of this library.
+    authentication, and network interceptors. These features have to be enabled
+    directly on the Cronet engine or built on top of this library.
   - It's not possible to set multiple values for a single header key in outgoing
     requests, Cronet uses the last value provided.
   - `Accept-Encoding` are automatically populated by Cronet based on the engine
