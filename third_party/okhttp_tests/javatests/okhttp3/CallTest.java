@@ -809,15 +809,18 @@ public abstract class CallTest {
             .setBody("/b has moved!"));
     server.enqueue(new MockResponse().setBody("C"));
 
-    executeSynchronously("/a").assertCode(200).assertBody("C");
-    // TODO(danstahr): Prior responses are not filled yet.
-    /*
-    .priorResponse()
-    .assertCode(302)
-    .assertHeader("Test", "Redirect from /b to /c")
-    .priorResponse()
-    .assertCode(301)
-    .assertHeader("Test", "Redirect from /a to /b");*/
+    executeSynchronously("/a")
+        .assertRecordedResponseRequestUrlPath("/c")
+        .assertCode(200)
+        .assertBody("C")
+        .priorResponse()
+        .assertRecordedResponseRequestUrlPath("/b")
+        .assertCode(302)
+        .assertHeader("Test", "Redirect from /b to /c")
+        .priorResponse()
+        .assertRecordedResponseRequestUrlPath("/a")
+        .assertCode(301)
+        .assertHeader("Test", "Redirect from /a to /b");
   }
 
   @Test
@@ -974,15 +977,19 @@ public abstract class CallTest {
     Request request = new Request.Builder().url(server.url("/a")).build();
     underTest.newCall(request).enqueue(callback);
 
-    callback.await(server.url("/a")).assertCode(200).assertBody("C");
-    // TODO(danstahr): Prior responses are not filled yet.
-    /*
-    .priorResponse()
-    .assertCode(302)
-    .assertHeader("Test", "Redirect from /b to /c")
-    .priorResponse()
-    .assertCode(301)
-    .assertHeader("Test", "Redirect from /a to /b");*/
+    callback
+        .await(server.url("/a"))
+        .assertCode(200)
+        .assertBody("C")
+        .assertRecordedResponseRequestUrlPath("/c")
+        .priorResponse()
+        .assertCode(302)
+        .assertHeader("Test", "Redirect from /b to /c")
+        .assertRecordedResponseRequestUrlPath("/b")
+        .priorResponse()
+        .assertCode(301)
+        .assertHeader("Test", "Redirect from /a to /b")
+        .assertRecordedResponseRequestUrlPath("/a");
   }
 
   @Test

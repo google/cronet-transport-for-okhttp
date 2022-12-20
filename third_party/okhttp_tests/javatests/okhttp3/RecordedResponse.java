@@ -55,6 +55,11 @@ public final class RecordedResponse {
     return this;
   }
 
+  public RecordedResponse assertRecordedResponseRequestUrlPath(String path) {
+    assertThat(response.request().url().encodedPath()).isEqualTo(path);
+    return this;
+  }
+
   public RecordedResponse assertCode(int expectedCode) {
     assertThat(response.code()).isEqualTo(expectedCode);
     return this;
@@ -86,7 +91,6 @@ public final class RecordedResponse {
   }
 
   /** Asserts that the current response was redirected and returns the prior response. */
-  // TODO(danstahr): Not filled by the Cronet bridge yet
   public RecordedResponse priorResponse() {
     Response priorResponse = response.priorResponse();
     assertThat(priorResponse).isNotNull();

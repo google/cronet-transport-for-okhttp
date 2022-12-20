@@ -16,6 +16,7 @@
 
 package com.google.net.cronet.okhttptransport;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 
 import androidx.annotation.NonNull;
@@ -68,11 +69,48 @@ final class ResponseConverter {
    * the result's {@link Response#body()} methods might block further.
    */
   Response toResponse(Request request, OkHttpBridgeRequestCallback callback) throws IOException {
+    UrlResponseInfo cronetResponseInfo = getFutureValue(callback.getUrlResponseInfo());
+    Response.Builder responseBuilder =
+        createResponse(request, cronetResponseInfo, getFutureValue(callback.getBodySource()));
+
+    List<UrlResponseInfo> redirectResponseInfos = callback.getUrlResponseInfoChain();
+    List<String> urlChain = cronetResponseInfo.getUrlChain();
+
+    if (!redirectResponseInfos.isEmpty()) {
+      checkArgument(
+          urlChain.size() == redirectResponseInfos.size() + 1,
+          "The number of redirects should be consistent across URLs and headers!");
+
+      Response priorResponse = null;
+      for (int i = 0; i < redirectResponseInfos.size(); i++) {
+        Request redirectedRequest = request.newBuilder().url(urlChain.get(i)).build();
+        priorResponse =
+            createResponse(redirectedRequest, redirectResponseInfos.get(i), null)
+                .priorResponse(priorResponse)
+                .build();
+      }
+
+      responseBuilder
+          .request(request.newBuilder().url(Iterables.getLast(urlChain)).build())
+          .priorResponse(priorResponse);
+    }
+
+    return responseBuilder.build();
+  }
+
+  ListenableFuture<Response> toResponseAsync(
+      Request request, OkHttpBridgeRequestCallback callback) {
+    return Futures.whenAllComplete(callback.getUrlResponseInfo(), callback.getBodySource())
+        .call(() -> toResponse(request, callback), MoreExecutors.directExecutor());
+  }
+
+  private static Response.Builder createResponse(
+      Request request, UrlResponseInfo cronetResponseInfo, @Nullable Source bodySource)
+      throws IOException {
+
     Response.Builder responseBuilder = new Response.Builder();
 
-    UrlResponseInfo urlResponseInfo = getFutureValue(callback.getUrlResponseInfo());
-
-    @Nullable String contentType = getLastHeaderValue(CONTENT_TYPE_HEADER_NAME, urlResponseInfo);
+    @Nullable String contentType = getLastHeaderValue(CONTENT_TYPE_HEADER_NAME, cronetResponseInfo);
 
     // If all content encodings are those known to Cronet natively, Cronet decodes the body stream.
     // Otherwise, it's sent to the callbacks verbatim. For consistency with OkHttp, we only leave
@@ -87,7 +125,7 @@ final class ResponseConverter {
 
     for (String contentEncodingHeaderValue :
         getOrDefault(
-            urlResponseInfo.getAllHeaders(),
+            cronetResponseInfo.getAllHeaders(),
             CONTENT_ENCODING_HEADER_NAME,
             Collections.emptyList())) {
       Iterables.addAll(contentEncodingItems, COMMA_SPLITTER.split(contentEncodingHeaderValue));
@@ -98,25 +136,28 @@ final class ResponseConverter {
             || !ENCODINGS_HANDLED_BY_CRONET.containsAll(contentEncodingItems);
 
     if (keepEncodingAffectedHeaders) {
-      contentLengthString = getLastHeaderValue(CONTENT_LENGTH_HEADER_NAME, urlResponseInfo);
+      contentLengthString = getLastHeaderValue(CONTENT_LENGTH_HEADER_NAME, cronetResponseInfo);
     }
 
-    ResponseBody responseBody =
-        createResponseBody(
-            request,
-            urlResponseInfo.getHttpStatusCode(),
-            contentType,
-            contentLengthString,
-            getFutureValue(callback.getBodySource()));
+    ResponseBody responseBody = null;
+    if (bodySource != null) {
+      responseBody =
+          createResponseBody(
+              request,
+              cronetResponseInfo.getHttpStatusCode(),
+              contentType,
+              contentLengthString,
+              bodySource);
+    }
 
     responseBuilder
         .request(request)
-        .code(urlResponseInfo.getHttpStatusCode())
-        .message(urlResponseInfo.getHttpStatusText())
-        .protocol(convertProtocol(urlResponseInfo.getNegotiatedProtocol()))
+        .code(cronetResponseInfo.getHttpStatusCode())
+        .message(cronetResponseInfo.getHttpStatusText())
+        .protocol(convertProtocol(cronetResponseInfo.getNegotiatedProtocol()))
         .body(responseBody);
 
-    for (Map.Entry<String, String> header : urlResponseInfo.getAllHeadersAsList()) {
+    for (Map.Entry<String, String> header : cronetResponseInfo.getAllHeadersAsList()) {
       boolean copyHeader = true;
       if (!keepEncodingAffectedHeaders) {
         if (Ascii.equalsIgnoreCase(header.getKey(), CONTENT_LENGTH_HEADER_NAME)
@@ -129,13 +170,7 @@ final class ResponseConverter {
       }
     }
 
-    return responseBuilder.build();
-  }
-
-  ListenableFuture<Response> toResponseAsync(
-      Request request, OkHttpBridgeRequestCallback callback) {
-    return Futures.whenAllComplete(callback.getUrlResponseInfo(), callback.getBodySource())
-        .call(() -> toResponse(request, callback), MoreExecutors.directExecutor());
+    return responseBuilder;
   }
 
   /**

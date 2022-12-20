@@ -220,6 +220,11 @@ public class CronetInterceptorEndToEndTest {
               "foo", Arrays.asList("bar"));
 
       assertThat(response.body().string()).isEqualTo("Finally reached /c!");
+
+      assertThat(response.request().url().encodedPath()).isEqualTo("/c");
+      assertThat(response.priorResponse().request().url().encodedPath()).isEqualTo("/b");
+      assertThat(response.priorResponse().priorResponse().request().url().encodedPath())
+          .isEqualTo("/google");
     }
   }
 

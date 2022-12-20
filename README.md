@@ -15,7 +15,7 @@ implementation 'com.google.net.cronet:cronet-okhttp:VERSION'
 ```
 
 You can also build the library from source. For information how to do that,
-see [CONTRIBUTING.md].
+see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## First steps
 
@@ -111,7 +111,6 @@ list of limitations and features that are not provided by the bridge:
     configuration. Custom values are ignored.
   - The `Response` object doesn't have the following fields set:
     - `handshake`
-    - `priorResponse`
     - `networkResponse`
     - `cacheResponse`
     - `sentRequestAtMillis` / `receivedResponseAtMillis`

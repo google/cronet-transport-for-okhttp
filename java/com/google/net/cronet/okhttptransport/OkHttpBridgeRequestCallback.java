@@ -25,6 +25,9 @@ import com.google.common.util.concurrent.SettableFuture;
 import java.io.IOException;
 import java.net.ProtocolException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -81,6 +84,9 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
   /** The read timeout as specified by OkHttp. * */
   private final long readTimeoutMillis;
 
+  /** The previous responses as reported to {@link #onRedirectReceived}, from oldest to newest. * */
+  private final List<UrlResponseInfo> urlResponseInfoChain = new ArrayList<>();
+
   private final RedirectStrategy redirectStrategy;
 
   /** The request being processed. Set when the request is first seen by the callback. */
@@ -114,6 +120,10 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
     return bodySourceFuture;
   }
 
+  List<UrlResponseInfo> getUrlResponseInfoChain() {
+    return Collections.unmodifiableList(urlResponseInfoChain);
+  }
+
   @Override
   public void onRedirectReceived(
       UrlRequest urlRequest, UrlResponseInfo urlResponseInfo, String nextUrl) {
@@ -128,7 +138,7 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
     }
 
     // We should follow redirects and we haven't hit the cap yet
-    // TODO(danstahr): Store the urlResponseInfo to populate the priorResponse chain
+    urlResponseInfoChain.add(urlResponseInfo);
     if (urlResponseInfo.getUrlChain().size() <= redirectStrategy.numberOfRedirectsToFollow()) {
       urlRequest.followRedirect();
       return;
