@@ -1,5 +1,7 @@
 load("@build_bazel_rules_android//android:rules.bzl", "android_binary", "android_instrumentation_test", "android_library", "android_local_test")
 
+package(default_applicable_licenses = ["//:license"])
+
 licenses(["notice"])
 
 android_library(

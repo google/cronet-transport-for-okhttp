@@ -1,5 +1,7 @@
 load("@build_bazel_rules_android//android:rules.bzl", "android_binary")
 
+package(default_applicable_licenses = ["//:license"])
+
 licenses(["notice"])
 
 android_binary(

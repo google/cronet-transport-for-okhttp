@@ -3,6 +3,7 @@ load("@build_bazel_rules_android//android:rules.bzl", "android_binary", "android
 licenses(["notice"])
 
 package(
+    default_applicable_licenses = ["//:license"],
     default_visibility = [
         "//java/com/google/net/cronet/testing:__subpackages__",
         "//javatests:__subpackages__",
