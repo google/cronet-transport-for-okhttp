@@ -127,8 +127,9 @@ public final class CronetCallFactory implements Call.Factory {
 
         return toCronetCallFactoryResponse(this, requestAndOkHttpResponse.getResponse());
       } catch (RuntimeException | IOException e) {
-        timeout.exit();
         throw e;
+      } finally {
+        timeout.exit();
       }
     }
 
