@@ -34,6 +34,7 @@ CronetEngine engine = new CronetEngine.Builder(applicationContext).build();
 
 Call.Factory callFactory = new OkHttpClient.Builder()
    ...
+   .protocols(listOf(Protocol.QUIC, Protocol.HTTP_2))
    .addInterceptor(CronetInterceptor.newBuilder(engine).build())
    .build();
 ```
