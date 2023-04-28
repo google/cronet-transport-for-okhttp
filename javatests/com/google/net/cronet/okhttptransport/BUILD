@@ -18,7 +18,7 @@ android_library(
         "@maven//:androidx_annotation_annotation",
         "@maven//:androidx_test_core",
         "@maven//:androidx_test_ext_junit",
-        "@maven//:com_google_guava_guava",
+        "@maven//:com_google_guava_guava",  # ,:concurrent,
         "@maven//:org_chromium_net_cronet_api",
     ],
 )
@@ -32,9 +32,10 @@ android_local_test(
     deps = [
         ":cronet_test_helpers",
         "//:okhttp_cronet_transport",
+        "//third_party/java/okio:okio_android",
         "@maven//:androidx_annotation_annotation",
         "@maven//:androidx_test_ext_junit",
-        "@maven//:com_google_guava_guava",
+        "@maven//:com_google_guava_guava",  # :base,
         "@maven//:com_google_truth_truth",
         "@maven//:com_squareup_okhttp3_okhttp",
         "@maven//:com_squareup_okio_okio",
@@ -52,8 +53,9 @@ android_local_test(
     manifest = "LocalTestManifest.xml",
     deps = [
         "//:okhttp_cronet_transport",
+        "//third_party/java/okio:okio_android",
         "@maven//:androidx_test_ext_junit",
-        "@maven//:com_google_guava_guava",
+        "@maven//:com_google_guava_guava",  # :base,:collect,:concurrent,
         "@maven//:com_google_truth_truth",
         "@maven//:com_squareup_okhttp3_okhttp",
         "@maven//:com_squareup_okio_okio",
@@ -73,7 +75,7 @@ android_library(
         "@maven//:androidx_test_core",
         "@maven//:androidx_test_ext_junit",
         "@maven//:androidx_test_runner",  # unuseddeps: keep
-        "@maven//:com_google_guava_guava",
+        "@maven//:com_google_guava_guava",  # :base,
         "@maven//:com_google_truth_truth",
         "@maven//:com_squareup_okhttp3_mockwebserver",
         "@maven//:com_squareup_okhttp3_okhttp",

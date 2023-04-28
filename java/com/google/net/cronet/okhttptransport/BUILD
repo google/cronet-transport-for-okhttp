@@ -12,6 +12,7 @@ android_library(
     neverlink = 1,
     visibility = ["//visibility:private"],
     exports = [
+        "//third_party/java/okio:okio_android",
         "@maven//:com_squareup_okhttp3_okhttp",
         "@maven//:com_squareup_okio_okio",
     ],
@@ -28,7 +29,7 @@ android_library(
         ":okhttp_cronet_transport_compile_only_deps",
         "@maven//:androidx_annotation_annotation",
         "@maven//:com_google_code_findbugs_jsr305",
-        "@maven//:com_google_guava_guava",
+        "@maven//:com_google_guava_guava",  # ,:concurrent,:listenablefuture,
         "@maven//:org_chromium_net_cronet_api",
     ],
 )

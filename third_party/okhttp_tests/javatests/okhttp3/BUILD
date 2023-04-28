@@ -11,11 +11,12 @@ android_library(
     visibility = ["//javatests:__subpackages__"],
     deps = [
         "//third_party/java/okhttp3:okhttp_mockwebserver_android",
+        "//third_party/java/okio:okio_android",
         "@maven//:androidx_annotation_annotation",
         "@maven//:androidx_test_core",
         "@maven//:androidx_test_ext_junit",
         "@maven//:com_google_code_findbugs_jsr305",
-        "@maven//:com_google_guava_guava",
+        "@maven//:com_google_guava_guava",  # ,:base,
         "@maven//:com_google_truth_truth",
         "@maven//:com_squareup_okhttp3_okhttp",
         "@maven//:com_squareup_okio_okio",
