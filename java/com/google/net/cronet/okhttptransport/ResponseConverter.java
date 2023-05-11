@@ -227,7 +227,7 @@ final class ResponseConverter {
       return Protocol.HTTP_2;
     } else if (negotiatedProtocol.contains("h2")) {
       return Protocol.HTTP_2;
-    } else if (negotiatedProtocol.contains("http1.1")) {
+    } else if (negotiatedProtocol.contains("http/1.1")) {
       return Protocol.HTTP_1_1;
     }
 
