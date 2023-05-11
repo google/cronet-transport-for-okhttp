@@ -71,7 +71,7 @@ public final class CronetCallFactory implements Call.Factory {
   }
 
   @Override
-  public Call newCall(Request request) {
+  public Call newCall(Request request) 
     return new CronetCall(request, this, converter, responseCallbackExecutor);
   }
 
