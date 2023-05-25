@@ -72,17 +72,14 @@ final class HttpClientHolder {
             .continueWith(
                 task -> {
                   // Call to propagate any errors from the first invocation. Don't attempt to
-                  // recover
-                  // from the error as it involves installing updates or other UX-disturbing
-                  // activities
-                  // with a lot of friction. We're better off just using plain OkHttp in such a
-                  // case.
+                  // recover from the error as it involves installing updates or other UX-disturbing
+                  // activities with a lot of friction. We're better off just using plain OkHttp
+                  // in such a case.
                   task.getResult();
 
                   for (CronetProvider provider : CronetProvider.getAllProviders(context)) {
                     // We're not interested in using the fallback, we're better off sticking with
-                    // the
-                    // default OkHttp client in that case.
+                    // the default OkHttp client in that case.
                     if (!provider.isEnabled()
                         || provider.getName().equals(CronetProvider.PROVIDER_NAME_FALLBACK)) {
                       continue;

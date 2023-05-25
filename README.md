@@ -4,7 +4,9 @@ This package allows OkHttp and Retrofit users to use Cronet as their transport
 layer, benefiting from features like QUIC/HTTP3 support and connection
 migration.
 
-## Installation
+## First steps
+
+### Installation
 
 The easiest way to import this library is to include it as a Gradle dependency
 in your app's `build.gradle` file. Simply add the following line and specify
@@ -14,10 +16,54 @@ the desired version.
 implementation 'com.google.net.cronet:cronet-okhttp:VERSION'
 ```
 
-You can also build the library from source. For information how to do that,
-see [CONTRIBUTING.md](CONTRIBUTING.md).
+You'll also need to specify a dependency on OkHttp (which you likely already
+have) and add a dependency on core Cronet, which we cover in the next section.
 
-## First steps
+### Adding a Cronet dependency
+
+There are several ways to obtain a `CronetEngine` instance, which is necessary
+to initialize this library.
+
+#### From the Play Services
+
+We recommend using a Google Play Services provider which loads Cronet
+implementation from the platform. This way the application doesn't need to pay
+the binary size cost of carrying Cronet and the platform ensures that the latest
+updates and security fixes are delivered. We also recommend falling back
+on using plain OkHttp if the platform-wide Cronet isn't available (e.g. because
+the device doesn't integrate with Google Play Services, or the platform has been
+tampered with).
+
+In order to use the Play Services Cronet provider, add the following dependency
+to your project:
+
+```
+implementation "com.google.android.gms:play-services-cronet:18.0.1"
+```
+
+Before creating a Cronet engine, you also need to initialize the bindings
+between your application and Google Play Services by calling
+
+```java
+CronetProviderInstaller.installProvider(context);
+```
+
+Note that the `installProvider` call is asynchronous. We omit handling
+of failures and synchronization here for brevity - check the
+[sample application provided with the library](java/com/google/samples/cronet/okhttptransport/HttpClientHolder.java)
+for an example which is more appropriate for production use.
+
+Finally, you can create a `CronetEngine` instance.
+
+```java
+CronetEngine cronetEngine = new CronetEngine.Builder(context)
+    .enableQuic(true)
+    .setUserAgent("Cronet OkHttp Transport Sample")
+    // ...
+    .build();
+```
+
+### Setting up the library
 
 There are two ways to use this library — either as an OkHttp application
 interceptor, or as a `Call` factory.
@@ -30,7 +76,7 @@ your current interceptor logic. Just add an extra interceptor to your client.
 > interceptors will be skipped.
 
 ```java
-CronetEngine engine = new CronetEngine.Builder(applicationContext).build();
+CronetEngine engine = ...
 
 Call.Factory callFactory = new OkHttpClient.Builder()
    ...
@@ -43,7 +89,7 @@ another library which requires `Call.Factory` instances (e.g. Retrofit), you'll
 be better off using the custom call factory implementation.
 
 ```java
-CronetEngine engine = new CronetEngine.Builder(applicationContext).build();
+CronetEngine engine = ...
 
 Call.Factory callFactory = CronetCallFactory.newBuilder(engine).build();
 ```
@@ -70,18 +116,6 @@ Retrofit retrofit = new Retrofit.Builder()
     .callFactory(callFactory)
     .build();
 ```
-
-### Getting hold of a Cronet engine
-
-There are several ways to obtain a `CronetEngine` instance. We recommend using
-a Google Play Services provider which loads Cronet from the platform. This way
-the application doesn't need to pay the binary size cost of carrying Cronet
-and the platform ensures that the latest updates and security fixes are
-delivered. We also recommend falling back on using plain OkHttp if
-the platform-wide Cronet isn't available (e.g. because the device doesn't
-integrate with Google Play Services, or the platform has been tampered with).
-
-This setup is demonstrated in the sample application provided with the library.
 
 ## Configuration
 The transport libraries are configured in two ways. The builders for both the
