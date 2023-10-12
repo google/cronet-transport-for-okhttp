@@ -10,7 +10,9 @@ migration.
 
 The easiest way to import this library is to include it as a Gradle dependency
 in your app's `build.gradle` file. Simply add the following line and specify
-the desired version.
+the desired version. The available VERSION can be found in the
+[Google Maven Repo](https://maven.google.com/web/index.html#com.google.net.cronet:cronet-okhttp)
+eg `0.1.0`.
 
 ```
 implementation 'com.google.net.cronet:cronet-okhttp:VERSION'
