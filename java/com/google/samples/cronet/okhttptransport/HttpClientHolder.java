@@ -116,13 +116,13 @@ final class HttpClientHolder {
   /**
    * Customizes the Cronet engine parameters in the provided builder.
    *
-   * <p>The application should alter this method to match its needs. For demonstration purposes we
-   * set the user agent and enable Brotli.
+   * <p>The application should alter this method to match its needs. For demonstration purposes, we
+   * enable Brotli.
    *
    * @return the received parameter for chaining
    */
   private CronetEngine.Builder setupCronetEngine(CronetEngine.Builder engineBuilder) {
-    return engineBuilder.enableBrotli(true).setUserAgent("Cronet OkHttp Transport Sample");
+    return engineBuilder.enableBrotli(true);
   }
 
   /**

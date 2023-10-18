@@ -1,8 +1,9 @@
 # Cronet Transport for OkHttp and Retrofit
 
-This package allows OkHttp and Retrofit users to use Cronet as their transport
-layer, benefiting from features like QUIC/HTTP3 support and connection
-migration.
+This package allows OkHttp and Retrofit users to use
+[Cronet](https://developer.android.com/guide/topics/connectivity/cronet)
+as their transport layer, benefiting from features like QUIC/HTTP3 support and
+connection migration.
 
 ## First steps
 
@@ -55,14 +56,12 @@ of failures and synchronization here for brevity - check the
 [sample application provided with the library](java/com/google/samples/cronet/okhttptransport/HttpClientHolder.java)
 for an example which is more appropriate for production use.
 
-Finally, you can create a `CronetEngine` instance.
+Finally, you can create a `CronetEngine` instance. Check out the
+[documentation](https://developer.android.com/guide/topics/connectivity/cronet/reference/org/chromium/net/CronetEngine.Builder)
+for custom `CronetEngine.Builder` configuration options.
 
 ```java
-CronetEngine cronetEngine = new CronetEngine.Builder(context)
-    .enableQuic(true)
-    .setUserAgent("Cronet OkHttp Transport Sample")
-    // ...
-    .build();
+CronetEngine cronetEngine = new CronetEngine.Builder(context).build();
 ```
 
 ### Setting up the library
@@ -78,10 +77,9 @@ your current interceptor logic. Just add an extra interceptor to your client.
 > interceptors will be skipped.
 
 ```java
-CronetEngine engine = ...
+CronetEngine engine = new CronetEngine.Builder(context).build();
 
 Call.Factory callFactory = new OkHttpClient.Builder()
-   ...
    .addInterceptor(CronetInterceptor.newBuilder(engine).build())
    .build();
 ```
@@ -91,7 +89,7 @@ another library which requires `Call.Factory` instances (e.g. Retrofit), you'll
 be better off using the custom call factory implementation.
 
 ```java
-CronetEngine engine = ...
+CronetEngine engine = new CronetEngine.Builder(context).build();
 
 Call.Factory callFactory = CronetCallFactory.newBuilder(engine).build();
 ```
