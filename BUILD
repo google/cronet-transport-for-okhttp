@@ -1,4 +1,4 @@
-load("//tools/build_defs/license:license.bzl", "license")
+load("@rules_license//rules:license.bzl", "license")
 load("@build_bazel_rules_android//android:rules.bzl", "android_library")
 load("//devtools/copybara/rules:copybara.bzl", "copybara_config_test")
 
@@ -7,6 +7,10 @@ package(default_applicable_licenses = ["//:license"])
 license(
     name = "license",
     package_name = "okhttp_cronet_transport",
+    # license_kinds is not needed as it is automatically inferred by blaze
+    # but we include it here so that it can be conveniently replaced when
+    # exported as bazel does not have this feature yet
+    license_kinds = ["@rules_license//licenses/spdx:Apache-2.0"],
 )
 
 licenses(["notice"])

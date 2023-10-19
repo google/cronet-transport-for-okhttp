@@ -64,11 +64,11 @@ android_sdk_repository(
     build_tools_version = "30.0.2"
 )
 
-ATS_TAG = "master"
+ATS_TAG = "main"
 http_archive(
     name = "android_test_support",
     strip_prefix = "android-test-%s" % ATS_TAG,
-    urls = ["https://github.com/android/android-test/archive/refs/heads/master.zip"],
+    urls = ["https://github.com/android/android-test/archive/refs/heads/%s.zip" % ATS_TAG],
 )
 load("@android_test_support//:repo.bzl", "android_test_repositories")
 android_test_repositories()
