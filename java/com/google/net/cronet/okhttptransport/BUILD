@@ -12,7 +12,6 @@ android_library(
     neverlink = 1,
     visibility = ["//visibility:private"],
     exports = [
-        "//third_party/java/okio:okio_android",
         "@maven//:com_squareup_okhttp3_okhttp",
         "@maven//:com_squareup_okio_okio",
     ],

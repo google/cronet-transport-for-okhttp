@@ -32,7 +32,6 @@ android_local_test(
     deps = [
         ":cronet_test_helpers",
         "//:okhttp_cronet_transport",
-        "//third_party/java/okio:okio_android",
         "@maven//:androidx_annotation_annotation",
         "@maven//:androidx_test_ext_junit",
         "@maven//:com_google_guava_guava",  # :base,
@@ -53,7 +52,6 @@ android_local_test(
     manifest = "LocalTestManifest.xml",
     deps = [
         "//:okhttp_cronet_transport",
-        "//third_party/java/okio:okio_android",
         "@maven//:androidx_test_ext_junit",
         "@maven//:com_google_guava_guava",  # :base,:collect,:concurrent,
         "@maven//:com_google_truth_truth",
@@ -72,12 +70,12 @@ android_library(
     deps = [
         "//:okhttp_cronet_transport",
         "//java/com/google/net/cronet/testing:cronet_engine_test_app_rule",
-        "//third_party/java/okhttp3:okhttp_mockwebserver_android",
         "@maven//:androidx_test_core",
         "@maven//:androidx_test_ext_junit",
         "@maven//:androidx_test_runner",  # unuseddeps: keep
         "@maven//:com_google_guava_guava",  # :base,
         "@maven//:com_google_truth_truth",
+        "@maven//:com_squareup_okhttp3_mockwebserver",
         "@maven//:com_squareup_okhttp3_okhttp",
         "@maven//:junit_junit",
         "@maven//:org_chromium_net_cronet_api",
@@ -110,13 +108,13 @@ android_library(
     deps = [
         "//:okhttp_cronet_transport",
         "//java/com/google/net/cronet/testing:cronet_engine_test_app_rule",
-        "//third_party/java/okhttp3:okhttp_mockwebserver_android",
         "//third_party/okhttp_tests/javatests/okhttp3:call_test_lib",
         "@maven//:androidx_annotation_annotation",
         "@maven//:androidx_test_core",
         "@maven//:androidx_test_ext_junit",
         "@maven//:androidx_test_runner",  # unuseddeps: keep
         "@maven//:com_google_truth_truth",
+        "@maven//:com_squareup_okhttp3_mockwebserver",
         "@maven//:com_squareup_okhttp3_okhttp",
         "@maven//:junit_junit",
         "@maven//:org_chromium_net_cronet_api",
