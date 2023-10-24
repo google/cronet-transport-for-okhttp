@@ -63,7 +63,9 @@ android_sdk_repository(
     api_level = 32,
     build_tools_version = "30.0.2"
 )
-
+# Configure Android NDK Path
+load("@build_bazel_rules_android//android:rules.bzl", "android_ndk_repository")
+android_ndk_repository(name = "androidndk")
 ATS_TAG = "main"
 http_archive(
     name = "android_test_support",
