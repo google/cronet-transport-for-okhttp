@@ -18,8 +18,24 @@ again.
 
 ## Building & testing the code
 
-The project uses [Bazel](https://bazel.build/). To build the entire repository,
-run
+The project uses [Bazel](https://bazel.build/) and requires:
+
+- Android SDK Platform 32
+- Android NDK 21+
+
+For local builds, set ANDROID_HOME and ANDROID_NDK_HOME. For example,
+```
+ANDROID_HOME=$PATH_TO_ANDROID_SDK
+ANDROID_NDK_HOME=$PATH_TO_ANDROID_NDK
+```
+
+If you run into `sdk/ndk path not set error` while building with the [bazel plugin](https://plugins.jetbrains.com/plugin/9185-bazel-for-android-studio), 
+consider setting the `--action_env` bazel flag. For eg:
+```
+--action_env=ANDROID_NDK_HOME=$PATH_TO_ANDROID_SDK
+```
+
+To build the entire repository, run
 
 ```
 bazel build $PATH_TO_GIT_REPO/...
@@ -29,6 +45,12 @@ To run all tests, use
 
 ```
 bazel test $PATH_TO_GIT_REPO/javatests/...
+```
+
+To install sample app, use
+
+```
+bazel mobile-install //java/com/google/samples/cronet/okhttptransport:okhttp_cronet_transport_sample --fat_apk_cpu=x86_64
 ```
 
 ## Code Reviews
