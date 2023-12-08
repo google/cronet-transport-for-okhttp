@@ -720,26 +720,34 @@ public abstract class CallTest {
   @Test
   public void callTimeout() throws Exception {
     underTest = createUnderTestWithCallTimeout(1000);
-    server.enqueue(new MockResponse().setBody("Hello there").setBodyDelay(10, SECONDS));
+    server.enqueue(
+        new MockResponse()
+            .setBody("Hello there")
+            .setBodyDelay(10, SECONDS)
+            .setHeadersDelay(10, SECONDS));
 
     Request request = new Request.Builder().url(server.url("/")).get().build();
 
     RecordedResponse response = executeSynchronously(request);
 
-    response.assertFailureMatches(".*canceled.*");
+    response.assertFailureMatches(".*timeout.*", ".*canceled.*");
   }
 
   @Test
   public void callTimeout_async() throws Exception {
     underTest = createUnderTestWithCallTimeout(1000);
-    server.enqueue(new MockResponse().setBody("Hello there").setBodyDelay(10, SECONDS));
+    server.enqueue(
+        new MockResponse()
+            .setBody("Hello there")
+            .setBodyDelay(10, SECONDS)
+            .setHeadersDelay(10, SECONDS));
 
     Request request = new Request.Builder().url(server.url("/")).get().build();
 
     underTest.newCall(request).enqueue(callback);
 
     RecordedResponse response = callback.await(server.url("/"));
-    response.assertFailureMatches(".*canceled.*");
+    response.assertFailureMatches(".*timeout.*", ".*canceled.*");
   }
 
   @Test
@@ -1147,9 +1155,12 @@ public abstract class CallTest {
   public void cancelBeforePostRequestBodyIsSent() throws Exception {
     server.enqueue(new MockResponse().throttleBody(1, 750, MILLISECONDS));
 
-    final Call call = underTest.newCall(
-        new Request.Builder().post(RequestBody.create(MediaType.get("text/plain"), "def"))
-            .url(server.url("/a")).build());
+    final Call call =
+        underTest.newCall(
+            new Request.Builder()
+                .post(RequestBody.create(MediaType.get("text/plain"), "def"))
+                .url(server.url("/a"))
+                .build());
     ExecutorService executor = Executors.newSingleThreadExecutor();
     Future<Response> result = executor.submit(call::execute);
 
@@ -1452,9 +1463,9 @@ public abstract class CallTest {
     Headers headers =
         new Headers.Builder()
             .add("Content-Length", "0")
-            .addLenient("a\tb: c\u007fd")
-            .addLenient(": ef")
-            .addLenient("\ud83c\udf69: \u2615\ufe0f")
+            .add("a\tb: c\u007fd")
+            .add(": ef")
+            .add("\ud83c\udf69: \u2615\ufe0f")
             .build();
     server.enqueue(new MockResponse().setHeaders(headers));
 
@@ -1544,7 +1555,7 @@ public abstract class CallTest {
 
     Call call = underTest.newCall(new Request.Builder().url(server.url("/")).build());
     Response response = call.execute();
-    assertThat(response.headers.toMultimap()).containsEntry("a\tb", Arrays.asList("c"));
+    assertThat(response.headers().toMultimap()).containsEntry("a\tb", Arrays.asList("c"));
   }
 
   @Test
