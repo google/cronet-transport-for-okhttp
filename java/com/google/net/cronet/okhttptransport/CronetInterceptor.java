@@ -80,6 +80,8 @@ public final class CronetInterceptor implements Interceptor, AutoCloseable {
                   if (activeCall.getKey().isCanceled()) {
                     activeCallsIterator.remove();
                     activeCall.getValue().cancel();
+                  } else if (activeCall.getValue().isDone()) {
+                    activeCallsIterator.remove();
                   }
                 } catch (RuntimeException e) {
                   Log.w(TAG, "Unable to propagate cancellation status", e);
