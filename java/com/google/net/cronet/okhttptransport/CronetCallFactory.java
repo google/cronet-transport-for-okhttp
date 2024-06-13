@@ -102,7 +102,7 @@ public final class CronetCallFactory implements Call.Factory {
           new AsyncTimeout() {
             @Override
             protected void timedOut() {
-              cancel();
+              CronetCall.this.cancel(); // Timeout has its own method named cancel
             }
           };
       timeout.timeout(motherFactory.callTimeoutMillis, MILLISECONDS);
