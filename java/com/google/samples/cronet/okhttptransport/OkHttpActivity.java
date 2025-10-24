@@ -45,7 +45,6 @@ public final class OkHttpActivity extends Activity {
     setContentView(R.layout.activity_main);
   }
 
-  @SuppressWarnings("AndroidJdkLibsChecker")
   @SuppressLint("SetTextI18n")
   public void onRequestButtonClicked(View view) {
     OkHttpClient client = getCastedApplication().getHttpClient();
