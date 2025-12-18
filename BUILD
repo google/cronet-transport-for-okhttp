@@ -2,7 +2,7 @@ load("@build_bazel_rules_android//android:rules.bzl", "android_library")
 load("@rules_license//rules:license.bzl", "license")
 # removed copybara load statement
 
-package(default_applicable_licenses = ["//:license"])
+package(default_applicable_licenses = [":license"])
 
 license(
     name = "license",
