@@ -135,7 +135,7 @@ public final class CronetInterceptor implements Interceptor, AutoCloseable {
 
     /** Builds the interceptor. The same builder can be used to build multiple interceptors. */
     @Override
-    public CronetInterceptor build(RequestResponseConverter converter) {
+    CronetInterceptor build(RequestResponseConverter converter) {
       return new CronetInterceptor(converter);
     }
   }
