@@ -94,7 +94,7 @@ android_binary(
 
 android_instrumentation_test(
     name = "CronetInterceptorEndToEndTest",
-    target_device = "@android_test_support//tools/android/emulated_devices/generic_phone:google_25_x86",
+    target_device = "@android_test_support//tools/android/emulated_devices/generic_phone:google_36_x86_64",
     test_app = ":cronet_interceptor_test_app",
 )
 
@@ -137,7 +137,7 @@ android_instrumentation_test(
     name = "CronetInterceptorCallTest",
     size = "large",
     shard_count = 4,
-    target_device = "@android_test_support//tools/android/emulated_devices/generic_phone:google_25_x86",
+    target_device = "@android_test_support//tools/android/emulated_devices/generic_phone:google_36_x86_64",
     test_app = ":call_test_app",
 )
 
@@ -145,6 +145,6 @@ android_instrumentation_test(
     name = "CronetCallFactoryCallTest",
     size = "large",
     shard_count = 4,
-    target_device = "@android_test_support//tools/android/emulated_devices/generic_phone:google_25_x86",
+    target_device = "@android_test_support//tools/android/emulated_devices/generic_phone:google_36_x86_64",
     test_app = ":call_test_app",
 )
