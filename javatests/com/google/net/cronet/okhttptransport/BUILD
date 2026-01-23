@@ -104,6 +104,7 @@ android_library(
     srcs = [
         "CronetCallFactoryCallTest.java",
         "CronetInterceptorCallTest.java",
+        "LargeReadBenchmarkTest.java",
     ],
     deps = [
         "//:okhttp_cronet_transport",
@@ -145,6 +146,13 @@ android_instrumentation_test(
     name = "CronetCallFactoryCallTest",
     size = "large",
     shard_count = 4,
+    target_device = "@android_test_support//tools/android/emulated_devices/generic_phone:google_36_x86_64",
+    test_app = ":call_test_app",
+)
+
+android_instrumentation_test(
+    name = "LargeReadBenchmarkTest",
+    size = "large",
     target_device = "@android_test_support//tools/android/emulated_devices/generic_phone:google_36_x86_64",
     test_app = ":call_test_app",
 )
