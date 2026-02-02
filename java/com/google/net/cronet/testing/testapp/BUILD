@@ -14,6 +14,8 @@ android_library(
     name = "embedded_cronet_test_app_lib",
     testonly = 1,
     srcs = glob(["*.java"]),
+    manifest = "AndroidManifest.xml",
+    resource_files = glob(["res/**"]),
     deps = [
         "@maven//:org_chromium_net_cronet_api",
         "@maven//:org_chromium_net_cronet_embedded",

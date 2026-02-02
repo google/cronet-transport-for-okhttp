@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="@raw/localhost_cert"/>
+        </trust-anchors>
+    </debug-overrides>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

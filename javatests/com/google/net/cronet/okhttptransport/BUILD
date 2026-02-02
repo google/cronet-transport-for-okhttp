@@ -106,9 +106,12 @@ android_library(
         "CronetInterceptorCallTest.java",
         "LargeReadBenchmarkTest.java",
     ],
+    manifest = "InstrumentationTestManifest.xml",
     deps = [
         "//:okhttp_cronet_transport",
         "//java/com/google/net/cronet/testing:cronet_engine_test_app_rule",
+        "//java/com/google/net/cronet/testing/testapp:embedded_cronet_test_app_lib",
+        "//third_party/java/okhttp4:okhttp_tls_android",
         "//third_party/okhttp_tests/javatests/okhttp3:call_test_lib",
         "@maven//:androidx_annotation_annotation",
         "@maven//:androidx_test_core",

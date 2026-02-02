@@ -18,9 +18,19 @@ package com.google.net.cronet.okhttptransport;
 
 import static com.google.common.truth.Truth.assertThat;
 
+import android.content.Context;
 import android.util.Log;
+import androidx.test.platform.app.InstrumentationRegistry;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import com.google.net.cronet.testing.CronetEngineTestAppRule;
 import java.io.IOException;
+import java.io.InputStream;
+import java.security.KeyFactory;
+import java.security.KeyPair;
+import java.security.PrivateKey;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.security.spec.PKCS8EncodedKeySpec;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
@@ -29,13 +39,17 @@ import java.util.Locale;
 import java.util.Random;
 import okhttp3.Call;
 import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
 import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.tls.HandshakeCertificates;
+import okhttp3.tls.HeldCertificate;
 import okio.Buffer;
 import okio.Sink;
 import okio.Timeout;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -94,9 +108,9 @@ public class LargeReadBenchmarkTest {
   public static Collection<Object[]> parameters() {
     return Arrays.asList(
         new Object[][] {
-          {"   Warmup#01", 10, Duration.ZERO},
-          {"   Warmup#02", 10, Duration.ZERO},
-          {"   Warmup#03", 10, Duration.ZERO},
+          {" Warmup#01", 10, Duration.ZERO},
+          {" Warmup#02", 10, Duration.ZERO},
+          {" Warmup#03", 10, Duration.ZERO},
           {"Iteration#01", 50, Duration.ZERO},
           {"Iteration#02", 50, Duration.ZERO},
           {"Iteration#03", 50, Duration.ZERO},
@@ -120,6 +134,33 @@ public class LargeReadBenchmarkTest {
         });
   }
 
+  /**
+   * Enables HTTPS on the test server. Separately, the test certificate is also specified in the
+   * Network Security Config of the APK under test so that the client will trust it.
+   */
+  @Before
+  public void setUpHttps() throws Exception {
+    Context context = InstrumentationRegistry.getInstrumentation().getContext();
+
+    final X509Certificate certificate;
+    try (InputStream certIs = context.getResources().openRawResource(R.raw.localhost_cert)) {
+      CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
+      certificate = (X509Certificate) certificateFactory.generateCertificate(certIs);
+    }
+
+    final PrivateKey privateKey;
+    try (InputStream keyIs = context.getResources().openRawResource(R.raw.localhost_key)) {
+      PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(keyIs.readAllBytes());
+      privateKey = KeyFactory.getInstance("RSA").generatePrivate(keySpec);
+    }
+
+    KeyPair keyPair = new KeyPair(certificate.getPublicKey(), privateKey);
+    HeldCertificate heldCertificate = new HeldCertificate(keyPair, certificate);
+    HandshakeCertificates handshakeCertificates =
+        new HandshakeCertificates.Builder().heldCertificate(heldCertificate).build();
+    server.useHttps(handshakeCertificates.sslSocketFactory(), false);
+  }
+
   @Test
   public void testCronetCallFactory() throws Exception {
     Call.Factory callFactory = CronetCallFactory.newBuilder(cronetEngineRule.getEngine()).build();
@@ -138,10 +179,12 @@ public class LargeReadBenchmarkTest {
   @Test
   public void testOkHttpClient() throws Exception {
     Call.Factory callFactory = new OkHttpClient.Builder().build();
-    runAndMeasure("OkHttpClient", callFactory);
+    Response response = runAndMeasure("OkHttpClient", callFactory);
+    assertThat(response.handshake()).isNotNull();
   }
 
-  private void runAndMeasure(String testName, Call.Factory callFactory) throws Exception {
+  @CanIgnoreReturnValue
+  private Response runAndMeasure(String testName, Call.Factory callFactory) throws Exception {
     int responseSizeBytes = responseSizeMb * 1024 * 1024;
     Buffer responseBody = generateRandomBytes(responseSizeBytes);
 
@@ -164,6 +207,9 @@ public class LargeReadBenchmarkTest {
 
     assertThat(response.code()).isEqualTo(200);
     assertThat(bytesRead).isEqualTo(responseSizeBytes);
+    assertThat(response.protocol()).isEqualTo(Protocol.HTTP_2);
+
+    return response;
   }
 
   private Buffer generateRandomBytes(int byteCount) {
