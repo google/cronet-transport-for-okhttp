@@ -21,7 +21,6 @@ import static com.google.common.truth.Truth.assertThat;
 import android.content.Context;
 import android.util.Log;
 import androidx.test.platform.app.InstrumentationRegistry;
-import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import com.google.net.cronet.testing.CronetEngineTestAppRule;
 import java.io.IOException;
 import java.io.InputStream;
@@ -33,8 +32,10 @@ import java.security.cert.X509Certificate;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
 import java.util.Random;
 import okhttp3.Call;
@@ -50,6 +51,7 @@ import okio.Buffer;
 import okio.Sink;
 import okio.Timeout;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -97,41 +99,54 @@ public class LargeReadBenchmarkTest {
   @Parameter(1)
   public int responseSizeMb;
 
+  @Parameter(2)
+  public Protocol protocol;
+
   /**
    * Every time OkHttp completes a read, we will spin loop for this amount of time. This can be used
    * to simulate work being done on the OkHttp caller threads in between reads.
    */
-  @Parameter(2)
+  @Parameter(3)
   public Duration workDuration;
 
   @Parameters(name = "{0}")
   public static Collection<Object[]> parameters() {
-    return Arrays.asList(
-        new Object[][] {
-          {" Warmup#01", 10, Duration.ZERO},
-          {" Warmup#02", 10, Duration.ZERO},
-          {" Warmup#03", 10, Duration.ZERO},
-          {"Iteration#01", 50, Duration.ZERO},
-          {"Iteration#02", 50, Duration.ZERO},
-          {"Iteration#03", 50, Duration.ZERO},
-          {"Iteration#04", 50, Duration.ZERO},
-          {"Iteration#05", 50, Duration.ZERO},
-          {"Iteration#06", 50, Duration.ZERO},
-          {"Iteration#07", 50, Duration.ZERO},
-          {"Iteration#08", 50, Duration.ZERO},
-          {"Iteration#09", 50, Duration.ZERO},
-          {"Iteration#10", 50, Duration.ZERO},
-          {"Iteration#11", 50, Duration.of(20, ChronoUnit.MICROS)},
-          {"Iteration#12", 50, Duration.of(20, ChronoUnit.MICROS)},
-          {"Iteration#13", 50, Duration.of(20, ChronoUnit.MICROS)},
-          {"Iteration#14", 50, Duration.of(20, ChronoUnit.MICROS)},
-          {"Iteration#15", 50, Duration.of(20, ChronoUnit.MICROS)},
-          {"Iteration#16", 50, Duration.of(20, ChronoUnit.MICROS)},
-          {"Iteration#17", 50, Duration.of(20, ChronoUnit.MICROS)},
-          {"Iteration#18", 50, Duration.of(20, ChronoUnit.MICROS)},
-          {"Iteration#19", 50, Duration.of(20, ChronoUnit.MICROS)},
-          {"Iteration#20", 50, Duration.of(20, ChronoUnit.MICROS)},
-        });
+    final int runs = 2;
+    final int response1mb = 1;
+    final int response10mb = 10;
+    final int response50mb = 50;
+    final Duration noWork = Duration.ZERO;
+    final Duration work20us = Duration.of(20, ChronoUnit.MICROS);
+    final Duration work100us = Duration.of(100, ChronoUnit.MICROS);
+    final Duration work200us = Duration.of(200, ChronoUnit.MICROS);
+
+    List<Object[]> params = new ArrayList<>();
+    int caseId = 1;
+
+    params.addAll(params(caseId++, runs, response1mb, Protocol.HTTP_1_1, noWork));
+    params.addAll(params(caseId++, runs, response10mb, Protocol.HTTP_1_1, noWork));
+    params.addAll(params(caseId++, runs, response50mb, Protocol.HTTP_1_1, noWork));
+    params.addAll(params(caseId++, runs, response50mb, Protocol.HTTP_1_1, work20us));
+    params.addAll(params(caseId++, runs, response50mb, Protocol.HTTP_1_1, work100us));
+    params.addAll(params(caseId++, runs, response50mb, Protocol.HTTP_1_1, work200us));
+    params.addAll(params(caseId++, runs, response1mb, Protocol.HTTP_2, noWork));
+    params.addAll(params(caseId++, runs, response10mb, Protocol.HTTP_2, noWork));
+    params.addAll(params(caseId++, runs, response50mb, Protocol.HTTP_2, noWork));
+    params.addAll(params(caseId++, runs, response50mb, Protocol.HTTP_2, work20us));
+    params.addAll(params(caseId++, runs, response50mb, Protocol.HTTP_2, work100us));
+    params.addAll(params(caseId++, runs, response50mb, Protocol.HTTP_2, work200us));
+
+    return params;
+  }
+
+  private static Collection<Object[]> params(
+      int caseId, int runs, int responseSizeMb, Protocol protocol, Duration workDuration) {
+    List<Object[]> parameters = new ArrayList<>();
+    for (int i = 1; i <= runs; i++) {
+      String testName = String.format("TestCase#%02d - Run#%02d", caseId, i);
+      parameters.add(new Object[] {testName, responseSizeMb, protocol, workDuration});
+    }
+    return parameters;
   }
 
   /**
@@ -158,10 +173,19 @@ public class LargeReadBenchmarkTest {
     HeldCertificate heldCertificate = new HeldCertificate(keyPair, certificate);
     HandshakeCertificates handshakeCertificates =
         new HandshakeCertificates.Builder().heldCertificate(heldCertificate).build();
+
+    if (protocol == Protocol.HTTP_1_1) {
+      server.setProtocols(Arrays.asList(Protocol.HTTP_1_1));
+    } else {
+      // MockWebServer requires the list to contain Protocol.HTTP_1_1.
+      server.setProtocols(Arrays.asList(protocol, Protocol.HTTP_1_1));
+    }
+
     server.useHttps(handshakeCertificates.sslSocketFactory(), false);
   }
 
   @Test
+  @Ignore("Ignoring since the results are the same as for both call factory and interceptor.")
   public void testCronetCallFactory() throws Exception {
     Call.Factory callFactory = CronetCallFactory.newBuilder(cronetEngineRule.getEngine()).build();
     runAndMeasure("CronetCallFactory", callFactory);
@@ -179,12 +203,10 @@ public class LargeReadBenchmarkTest {
   @Test
   public void testOkHttpClient() throws Exception {
     Call.Factory callFactory = new OkHttpClient.Builder().build();
-    Response response = runAndMeasure("OkHttpClient", callFactory);
-    assertThat(response.handshake()).isNotNull();
+    runAndMeasure("OkHttpClient", callFactory);
   }
 
-  @CanIgnoreReturnValue
-  private Response runAndMeasure(String testName, Call.Factory callFactory) throws Exception {
+  private void runAndMeasure(String testName, Call.Factory callFactory) throws Exception {
     int responseSizeBytes = responseSizeMb * 1024 * 1024;
     Buffer responseBody = generateRandomBytes(responseSizeBytes);
 
@@ -203,13 +225,12 @@ public class LargeReadBenchmarkTest {
     long bytesRead = response.body().source().readAll(sink);
     long readEndNs = System.nanoTime();
 
-    logResults(testName, sink.readsCount, readStartNs, readEndNs);
+    logResults(testName, sink.readsCount, response.protocol(), readStartNs, readEndNs);
 
     assertThat(response.code()).isEqualTo(200);
     assertThat(bytesRead).isEqualTo(responseSizeBytes);
-    assertThat(response.protocol()).isEqualTo(Protocol.HTTP_2);
-
-    return response;
+    assertThat(response.protocol()).isEqualTo(protocol);
+    assertThat(server.takeRequest().getHandshake()).isNotNull();
   }
 
   private Buffer generateRandomBytes(int byteCount) {
@@ -229,23 +250,23 @@ public class LargeReadBenchmarkTest {
     return buffer;
   }
 
-  private void logResults(String testName, int readsCount, long readStartNs, long readEndNs) {
+  private void logResults(
+      String testName, int readsCount, Protocol protocol, long readStartNs, long readEndNs) {
     long readDurationMs = (readEndNs - readStartNs) / 1_000_000L;
 
     String workDurationString =
-        workDuration.isPositive()
-            ? String.format("work duration: %dus", workDuration.toNanos() / 1_000L)
-            : "no work";
+        workDuration.isPositive() ? String.format("%dus", workDuration.toNanos() / 1_000L) : "no";
 
     Log.e(
         "LargeReadBenchmarkTest",
         String.format(
             Locale.US,
-            "%s - %s - response size: %dMB, reads count: %d, %s, read duration: %dms",
+            "%s - %s - %dMB response, %d reads, %s, %s work, read duration: %dms",
             testName,
             iterationName,
             responseSizeMb,
             readsCount,
+            protocol,
             workDurationString,
             readDurationMs));
   }
