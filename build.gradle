@@ -1,0 +1,47 @@
+// Copyright 2026 Google LLC
+
+// Note this Gradle build script can only build the sample app. It does not build the library
+// itself, nor the tests, which are built using Bazel (see BUILD files).
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath "com.android.tools.build:gradle:8.13.2"
+    }
+}
+
+apply plugin: 'com.android.application'
+
+android {
+  namespace 'com.google.samples.cronet.okhttptransport'
+  compileSdk 36
+
+  defaultConfig {
+    minSdk 25
+    targetSdk 36
+  }
+
+  sourceSets.main {
+    java.srcDirs = ['java/com/google/samples/cronet/okhttptransport']
+    manifest.srcFile 'java/com/google/samples/cronet/okhttptransport/AndroidManifest.xml'
+    res.srcDirs = ['java/com/google/samples/cronet/okhttptransport/res']
+  }
+}
+
+allprojects {
+  repositories {
+    google()
+    mavenCentral()
+  }
+}
+
+dependencies {
+  implementation 'com.google.net.cronet:cronet-okhttp:0.1.0'
+  implementation 'com.google.android.gms:play-services-cronet:18.0.1'
+  implementation 'com.squareup.okhttp3:okhttp:3.12.13'
+  implementation 'com.google.guava:guava:31.1-android'
+}
