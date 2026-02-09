@@ -1,24 +1,36 @@
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
 RULES_JVM_EXTERNAL_TAG = "4.2"
+
 RULES_JVM_EXTERNAL_SHA = "cd1a77b7b02e8e008439ca76fd34f5b07aecb8c752961f9640dea15e9e5ba1ca"
+
 http_archive(
     name = "rules_jvm_external",
-    strip_prefix = "rules_jvm_external-%s" % RULES_JVM_EXTERNAL_TAG,
     sha256 = RULES_JVM_EXTERNAL_SHA,
+    strip_prefix = "rules_jvm_external-%s" % RULES_JVM_EXTERNAL_TAG,
     url = "https://github.com/bazelbuild/rules_jvm_external/archive/%s.zip" % RULES_JVM_EXTERNAL_TAG,
 )
+
 load("@rules_jvm_external//:repositories.bzl", "rules_jvm_external_deps")
+
 rules_jvm_external_deps()
+
 load("@rules_jvm_external//:setup.bzl", "rules_jvm_external_setup")
+
 rules_jvm_external_setup()
+
 http_archive(
     name = "robolectric",
-    urls = ["https://github.com/robolectric/robolectric-bazel/archive/4.7.3.tar.gz"],
     strip_prefix = "robolectric-bazel-4.7.3",
+    urls = ["https://github.com/robolectric/robolectric-bazel/archive/4.7.3.tar.gz"],
 )
+
 load("@robolectric//bazel:robolectric.bzl", "robolectric_repositories")
+
 robolectric_repositories()
+
 load("@rules_jvm_external//:defs.bzl", "maven_install")
+
 maven_install(
     artifacts = [
         # OkHttp
@@ -49,28 +61,35 @@ maven_install(
         "https://repo1.maven.org/maven2",
     ],
 )
+
 # Load the Android build rules
 http_archive(
     name = "build_bazel_rules_android",
-    urls = ["https://github.com/bazelbuild/rules_android/archive/v0.1.1.zip"],
     sha256 = "cd06d15dd8bb59926e4d65f9003bfc20f9da4b2519985c27e190cddc8b7a7806",
     strip_prefix = "rules_android-0.1.1",
+    urls = ["https://github.com/bazelbuild/rules_android/archive/v0.1.1.zip"],
 )
+
 # Configure Android SDK Path
-load("@build_bazel_rules_android//android:rules.bzl", "android_sdk_repository")
+load("@build_bazel_rules_android//android:rules.bzl", "android_ndk_repository", "android_sdk_repository")
+
 android_sdk_repository(
     name = "androidsdk",
     api_level = 32,
-    build_tools_version = "30.0.2"
+    build_tools_version = "30.0.2",
 )
+
 # Configure Android NDK Path
-load("@build_bazel_rules_android//android:rules.bzl", "android_ndk_repository")
 android_ndk_repository(name = "androidndk")
+
 ATS_TAG = "main"
+
 http_archive(
     name = "android_test_support",
     strip_prefix = "android-test-%s" % ATS_TAG,
     urls = ["https://github.com/android/android-test/archive/refs/heads/%s.zip" % ATS_TAG],
 )
+
 load("@android_test_support//:repo.bzl", "android_test_repositories")
+
 android_test_repositories()
