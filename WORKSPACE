@@ -45,6 +45,10 @@ maven_install(
         "com.google.code.findbugs:jsr305:3.0.2",
         "com.android.support:appcompat-v7:28.0.0",
         "androidx.annotation:annotation:1.9.1",
+        # Make sure any transitive dependency on error-prone is at least:
+        #   https://github.com/google/error-prone/releases/tag/v2.46.0
+        # So that we get the fix for https://github.com/google/error-prone/issues/2122
+        "com.google.errorprone:error_prone_annotations:2.46.0",
         # Testing
         "org.robolectric:robolectric:4.7.3",
         "com.google.truth:truth:1.1.3",
