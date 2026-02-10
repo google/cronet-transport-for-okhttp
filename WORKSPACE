@@ -44,10 +44,10 @@ maven_install(
         "com.google.guava:guava:31.1-android",
         "com.google.code.findbugs:jsr305:3.0.2",
         "com.android.support:appcompat-v7:28.0.0",
+        "androidx.annotation:annotation:1.9.1",
         # Testing
         "org.robolectric:robolectric:4.7.3",
         "com.google.truth:truth:1.1.3",
-        "androidx.annotation:annotation:1.3.0",
         "androidx.test:core:1.3.0",
         "androidx.test.ext:junit:1.1.1",
         "androidx.test:runner:1.4.0",
