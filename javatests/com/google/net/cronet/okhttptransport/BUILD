@@ -19,6 +19,8 @@ android_library(
         "@maven//:androidx_test_core",
         "@maven//:androidx_test_ext_junit",
         "@maven//:com_google_guava_guava",  # ,:concurrent,
+        "@maven//:com_google_truth_truth",
+        "@maven//:com_squareup_okio_okio",
         "@maven//:org_chromium_net_cronet_api",
     ],
 )
@@ -105,9 +107,11 @@ android_library(
         "CronetCallFactoryCallTest.java",
         "CronetInterceptorCallTest.java",
         "LargeReadBenchmarkTest.java",
+        "ReadIntegrityTest.java",
     ],
     manifest = "InstrumentationTestManifest.xml",
     deps = [
+        ":cronet_test_helpers",
         "//:okhttp_cronet_transport",
         "//java/com/google/net/cronet/testing:cronet_engine_test_app_rule",
         "//java/com/google/net/cronet/testing/testapp:embedded_cronet_test_app_lib",
@@ -155,6 +159,13 @@ android_instrumentation_test(
 
 android_instrumentation_test(
     name = "LargeReadBenchmarkTest",
+    size = "large",
+    target_device = "@android_test_support//tools/android/emulated_devices/generic_phone:google_36_x86_64",
+    test_app = ":call_test_app",
+)
+
+android_instrumentation_test(
+    name = "ReadIntegrityTest",
     size = "large",
     target_device = "@android_test_support//tools/android/emulated_devices/generic_phone:google_36_x86_64",
     test_app = ":call_test_app",

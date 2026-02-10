@@ -37,7 +37,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
-import java.util.Random;
 import okhttp3.Call;
 import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
@@ -208,7 +207,7 @@ public class LargeReadBenchmarkTest {
 
   private void runAndMeasure(String testName, Call.Factory callFactory) throws Exception {
     int responseSizeBytes = responseSizeMb * 1024 * 1024;
-    Buffer responseBody = generateRandomBytes(responseSizeBytes);
+    Buffer responseBody = TestUtils.generateRandomBytes(responseSizeBytes);
 
     server.enqueue(
         new MockResponse()
@@ -231,23 +230,6 @@ public class LargeReadBenchmarkTest {
     assertThat(bytesRead).isEqualTo(responseSizeBytes);
     assertThat(response.protocol()).isEqualTo(protocol);
     assertThat(server.takeRequest().getHandshake()).isNotNull();
-  }
-
-  private Buffer generateRandomBytes(int byteCount) {
-    Buffer buffer = new Buffer();
-    byte[] bytes = new byte[8192];
-    Random random = new Random();
-
-    while (buffer.size() < byteCount) {
-      random.nextBytes(bytes);
-      int remaining = byteCount - (int) buffer.size();
-      int toWrite = Math.min(bytes.length, remaining);
-      buffer.write(bytes, 0, toWrite);
-    }
-
-    assertThat(buffer.size()).isEqualTo(byteCount);
-
-    return buffer;
   }
 
   private void logResults(

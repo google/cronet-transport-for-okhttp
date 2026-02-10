@@ -58,7 +58,7 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
    * The byte buffer capacity for reading Cronet response bodies. Each response callback will
    * allocate its own buffer of this size once the response starts being processed.
    */
-  private static final int CRONET_BYTE_BUFFER_CAPACITY = 32 * 1024;
+  static final int CRONET_BYTE_BUFFER_CAPACITY = 32 * 1024;
 
   /** A bridge between Cronet's asynchronous callbacks and OkHttp's blocking stream-like reads. */
   private final SettableFuture<Source> bodySourceFuture = SettableFuture.create();
@@ -165,12 +165,12 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
   @Override
   public void onReadCompleted(
       UrlRequest urlRequest, UrlResponseInfo urlResponseInfo, ByteBuffer byteBuffer) {
-    callbackResults.add(new CallbackResult(CallbackStep.ON_READ_COMPLETED, byteBuffer, null));
+    callbackResults.add(new CallbackResult(CallbackStep.ON_READ_COMPLETED, null));
   }
 
   @Override
   public void onSucceeded(UrlRequest urlRequest, UrlResponseInfo urlResponseInfo) {
-    callbackResults.add(new CallbackResult(CallbackStep.ON_SUCCESS, null, null));
+    callbackResults.add(new CallbackResult(CallbackStep.ON_SUCCESS, null));
   }
 
   @Override
@@ -183,13 +183,13 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
 
     // If this was called as a reaction to a read() call, the read result will propagate
     // the exception.
-    callbackResults.add(new CallbackResult(CallbackStep.ON_FAILED, null, e));
+    callbackResults.add(new CallbackResult(CallbackStep.ON_FAILED, e));
   }
 
   @Override
   public void onCanceled(UrlRequest urlRequest, UrlResponseInfo responseInfo) {
     canceled.set(true);
-    callbackResults.add(new CallbackResult(CallbackStep.ON_CANCELED, null, null));
+    callbackResults.add(new CallbackResult(CallbackStep.ON_CANCELED, null));
 
     // If there's nobody listening it's possible that the cancellation happened before we even
     // received anything from the server. In that case inform the thread that's awaiting server
@@ -202,6 +202,7 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
 
   private class CronetBodySource implements Source {
 
+    /** This buffer is used for reading data from the network and for writing it downstream. */
     private ByteBuffer buffer = ByteBuffer.allocateDirect(CRONET_BYTE_BUFFER_CAPACITY);
 
     /** Whether the close() method has been called. */
@@ -222,9 +223,69 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
         return -1;
       }
 
-      if (byteCount < buffer.limit()) {
-        buffer.limit((int) byteCount);
+      // If the caller requested 0 bytes, then we don't need to read from the network. Technically,
+      // reading 0 bytes doesn't make sense, but we'll still support this case.
+      if (byteCount == 0) {
+        return 0;
       }
+
+      // Attempt to read from the network to fill the empty buffer.
+      //
+      // When we enter Source#read() method and the buffer.position() is 0, then we definitely know
+      // that the buffer is empty and we need to read from the network.
+      //
+      // Technically, in the general case, buffer.position() == 0 check is ambiguous, and could mean
+      // one of the two things:
+      // 1. After buffer.clear() was called – the buffer is empty.
+      // 2. After buffer.flip() was called – the buffer was just written to, but not yet read from.
+      //
+      // However, in the context of this method, buffer.position() == 0 check is unambiguous.
+      // Because as soon as we read from the network, we write downstream which always increases the
+      // buffer.position(). Thus, the next time we enter this method, the buffer.position() will
+      // either be > 0 if there's still data in the buffer, so we can't read from the network yet.
+      // Or it will be 0 if the buffer was emptied in one read, so we need to read from the network.
+      if (buffer.position() == 0) {
+        if (fillBuffer()) {
+          buffer.flip(); // Flip the buffer so that it can be used for writing downstream.
+          checkState(buffer.hasRemaining(), "Buffer should have remaining bytes after flip");
+        } else {
+          return -1; // End of stream
+        }
+      }
+
+      // Now that the buffer is non-empty, write as much data as possible downstream.
+      final int bytesWritten = copyByteBufferToOkioBuffer(buffer, sink, byteCount);
+      checkState(bytesWritten > 0, "Bytes written should be positive");
+
+      // In case the buffer became empty again, clear it so that it can be used for reading from the
+      // network next time Source#read() is called.
+      if (!buffer.hasRemaining()) {
+        buffer.clear();
+      }
+
+      return bytesWritten;
+    }
+
+    /**
+     * Reads data from the network to fill the buffer.
+     *
+     * <p>Note we always request Cronet to read up to the entire buffer capacity. This will normally
+     * be larger than the caller's sink buffer size, as (at the time of writing) OkIo only reads in
+     * hardcoded fixed 8 KiB "segments". This is a performance optimization - it would be simpler to
+     * read up to the caller's buffer size, but 8 KiB is too small for efficient Cronet operation
+     * due to large per-read overhead. Instead, we read larger buffers which are then split and
+     * handed off chunk by chunk to the caller. See
+     * https://github.com/google/cronet-transport-for-okhttp/issues/47.
+     *
+     * <p>This method blocks until the read is completed or a timeout occurs.
+     *
+     * @return Whether any bytes were read. Returns true if the UrlRequest.read() was followed by
+     *     UrlRequest.Callback.onReadCompleted(). Returns false for any other outcome: onCanceled(),
+     *     onFailed(), onSucceeded() callbacks, or timeout.
+     */
+    private boolean fillBuffer() throws IOException {
+      checkState(buffer.position() == 0, "Buffer position is not 0");
+      checkState(buffer.limit() == buffer.capacity(), "Buffer limit is not capacity");
 
       request.read(buffer);
 
@@ -252,21 +313,48 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
         case ON_SUCCESS:
           finished.set(true);
           buffer = null;
-          return -1;
+          return false;
         case ON_CANCELED:
           // The canceled flag is already set by the onCanceled method
           // so not setting it here.
-
           buffer = null;
           throw new IOException("The request was canceled!");
         case ON_READ_COMPLETED:
-          result.buffer.flip();
-          int bytesWritten = sink.write(result.buffer);
-          result.buffer.clear();
-          return bytesWritten;
+          return true;
       }
 
       throw new AssertionError("The switch block above is exhaustive!");
+    }
+
+    /**
+     * Copies the data from a {@link ByteBuffer} to a {@link Buffer}. Equivalent to calling {@link
+     * Buffer#write(ByteBuffer)}, but only copies up to `byteCount` bytes.
+     *
+     * @param from The ByteBuffer to read from.
+     * @param to The Buffer to write to.
+     * @param byteCount The maximum number of bytes to copy.
+     * @return the number of bytes written to the buffer.
+     */
+    private static int copyByteBufferToOkioBuffer(ByteBuffer from, Buffer to, long byteCount)
+        throws IOException {
+      final int bytesWritten;
+
+      if (from.remaining() <= byteCount) {
+        bytesWritten = to.write(from);
+      } else {
+        final int originalLimit = from.limit();
+        try {
+          // Sadly, Buffer#write() does not take a byteCount when writing to a ByteBuffer. We work
+          // around this limitation by temporarily adjusting the limit.
+          from.limit(from.position() + (int) byteCount);
+          bytesWritten = to.write(from);
+        } finally {
+          // Restore the original limit to preserve buffer state
+          from.limit(originalLimit);
+        }
+      }
+
+      return bytesWritten;
     }
 
     @Override
@@ -289,15 +377,10 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
 
   private static class CallbackResult {
     private final CallbackStep callbackStep;
-    @Nullable private final ByteBuffer buffer;
     @Nullable private final CronetException exception;
 
-    private CallbackResult(
-        CallbackStep callbackStep,
-        @Nullable ByteBuffer buffer,
-        @Nullable CronetException exception) {
+    private CallbackResult(CallbackStep callbackStep, @Nullable CronetException exception) {
       this.callbackStep = callbackStep;
-      this.buffer = buffer;
       this.exception = exception;
     }
   }
