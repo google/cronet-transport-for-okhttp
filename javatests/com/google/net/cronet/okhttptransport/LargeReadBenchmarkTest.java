@@ -30,8 +30,6 @@ import java.security.PrivateKey;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.security.spec.PKCS8EncodedKeySpec;
-import java.time.Duration;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -106,7 +104,7 @@ public class LargeReadBenchmarkTest {
    * to simulate work being done on the OkHttp caller threads in between reads.
    */
   @Parameter(3)
-  public Duration workDuration;
+  public int workDurationUs;
 
   @Parameters(name = "{0}")
   public static Collection<Object[]> parameters() {
@@ -114,10 +112,10 @@ public class LargeReadBenchmarkTest {
     final int response1mb = 1;
     final int response10mb = 10;
     final int response50mb = 50;
-    final Duration noWork = Duration.ZERO;
-    final Duration work20us = Duration.of(20, ChronoUnit.MICROS);
-    final Duration work100us = Duration.of(100, ChronoUnit.MICROS);
-    final Duration work200us = Duration.of(200, ChronoUnit.MICROS);
+    final int noWork = 0;
+    final int work20us = 20;
+    final int work100us = 100;
+    final int work200us = 200;
 
     List<Object[]> params = new ArrayList<>();
     int caseId = 1;
@@ -139,11 +137,11 @@ public class LargeReadBenchmarkTest {
   }
 
   private static Collection<Object[]> params(
-      int caseId, int runs, int responseSizeMb, Protocol protocol, Duration workDuration) {
+      int caseId, int runs, int responseSizeMb, Protocol protocol, int workDurationUs) {
     List<Object[]> parameters = new ArrayList<>();
     for (int i = 1; i <= runs; i++) {
       String testName = String.format("TestCase#%02d - Run#%02d", caseId, i);
-      parameters.add(new Object[] {testName, responseSizeMb, protocol, workDuration});
+      parameters.add(new Object[] {testName, responseSizeMb, protocol, workDurationUs});
     }
     return parameters;
   }
@@ -236,8 +234,7 @@ public class LargeReadBenchmarkTest {
       String testName, int readsCount, Protocol protocol, long readStartNs, long readEndNs) {
     long readDurationMs = (readEndNs - readStartNs) / 1_000_000L;
 
-    String workDurationString =
-        workDuration.isPositive() ? String.format("%dus", workDuration.toNanos() / 1_000L) : "no";
+    String workDurationString = workDurationUs > 0 ? String.format("%dus", workDurationUs) : "no";
 
     Log.e(
         "LargeReadBenchmarkTest",
@@ -266,14 +263,14 @@ public class LargeReadBenchmarkTest {
     public void write(Buffer source, long byteCount) throws IOException {
       source.skip(byteCount);
       readsCount++;
-      if (workDuration.isPositive()) {
+      if (workDurationUs > 0) {
         doWork();
       }
     }
 
     private void doWork() {
       long startNs = System.nanoTime();
-      while (System.nanoTime() - startNs < workDuration.toNanos()) {
+      while (System.nanoTime() - startNs < workDurationUs * 1000) {
         Thread.onSpinWait();
       }
     }
