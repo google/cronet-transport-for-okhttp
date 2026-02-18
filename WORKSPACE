@@ -36,6 +36,7 @@ maven_install(
         # OkHttp
         "com.squareup.okhttp3:okhttp:3.12.13",
         "com.squareup.okhttp3:mockwebserver:3.12.13",
+        "com.squareup.okhttp3:okhttp-tls:3.12.13",
         "com.squareup.okio:okio:2.10.0",
         # Cronet
         "org.chromium.net:cronet-api:98.4758.101",
@@ -52,9 +53,9 @@ maven_install(
         # Testing
         "org.robolectric:robolectric:4.7.3",
         "com.google.truth:truth:1.1.3",
-        "androidx.test:core:1.3.0",
-        "androidx.test.ext:junit:1.1.1",
-        "androidx.test:runner:1.4.0",
+        "androidx.test:core:1.7.0",
+        "androidx.test.ext:junit:1.3.0",
+        "androidx.test:runner:1.7.0",
         "junit:junit:4.13.2",
         # Sample app dependencies
         "com.google.android.gms:play-services-tasks:18.0.1",

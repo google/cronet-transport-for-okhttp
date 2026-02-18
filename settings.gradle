@@ -1,2 +1,5 @@
 include 'sample'
 project(':sample').projectDir = file('gradle/sample')
+
+include 'test'
+project(':test').projectDir = file('gradle/test')

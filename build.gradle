@@ -1,7 +1,8 @@
 // Copyright 2026 Google LLC
 
-// Note this Gradle build script can only build the sample app. It does not build the library
-// itself, nor the tests, which are built using Bazel (see BUILD files).
+// Note this Gradle build script can only build the sample app and test code. It
+// does not build the library itself, which is built using Bazel (see BUILD
+// files).
 
 buildscript {
     repositories {
