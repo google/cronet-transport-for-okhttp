@@ -17,7 +17,6 @@
 package com.google.net.cronet.okhttptransport;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.net.cronet.okhttptransport.OkHttpBridgeRequestCallback.CRONET_BYTE_BUFFER_CAPACITY;
 
 import com.google.net.cronet.testing.CronetEngineTestAppRule;
 import java.util.Arrays;
@@ -42,6 +41,9 @@ import org.junit.runners.Parameterized.Parameters;
  */
 @RunWith(Parameterized.class)
 public class ReadIntegrityTest {
+
+  /** See {@link OkHttpBridgeRequestCallback#CRONET_BYTE_BUFFER_CAPACITY}. */
+  private static final int CRONET_BYTE_BUFFER_CAPACITY = 32 * 1024;
 
   /**
    * This is the segment size defined by the internal okio.Segment.SIZE. This is the size OkIo uses

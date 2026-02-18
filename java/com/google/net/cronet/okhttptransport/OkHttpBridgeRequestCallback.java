@@ -58,7 +58,8 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
    * The byte buffer capacity for reading Cronet response bodies. Each response callback will
    * allocate its own buffer of this size once the response starts being processed.
    */
-  static final int CRONET_BYTE_BUFFER_CAPACITY = 32 * 1024;
+  // If you change this value, make sure to reflect the change in ReadIntegrityTest.
+  private static final int CRONET_BYTE_BUFFER_CAPACITY = 32 * 1024;
 
   /** A bridge between Cronet's asynchronous callbacks and OkHttp's blocking stream-like reads. */
   private final SettableFuture<Source> bodySourceFuture = SettableFuture.create();
