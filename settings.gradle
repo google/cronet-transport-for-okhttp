@@ -1,0 +1,2 @@
+include 'sample'
+project(':sample').projectDir = file('gradle/sample')

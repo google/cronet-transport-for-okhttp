@@ -1,0 +1,26 @@
+apply plugin: 'com.android.application'
+
+android {
+  namespace 'com.google.samples.cronet.okhttptransport'
+  compileSdk 36
+
+  defaultConfig {
+    minSdk 23
+    targetSdk 36
+  }
+
+  sourceSets {
+    main {
+      java.srcDirs = ['../../java/com/google/samples/cronet/okhttptransport']
+      manifest.srcFile '../../java/com/google/samples/cronet/okhttptransport/AndroidManifest.xml'
+      res.srcDirs = ['../../java/com/google/samples/cronet/okhttptransport/res']
+    }
+  }
+}
+
+dependencies {
+  implementation 'com.google.net.cronet:cronet-okhttp:0.1.0'
+  implementation 'com.google.android.gms:play-services-cronet:18.0.1'
+  implementation 'com.squareup.okhttp3:okhttp:3.12.13'
+  implementation 'com.google.guava:guava:31.1-android'
+}
