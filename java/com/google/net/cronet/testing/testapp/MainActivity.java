@@ -18,6 +18,7 @@ package com.google.net.cronet.testing.testapp;
 
 import android.app.Activity;
 import android.os.Bundle;
+import androidx.annotation.VisibleForTesting;
 import org.chromium.net.CronetEngine;
 
 /**
@@ -37,6 +38,7 @@ public final class MainActivity extends Activity {
     cronetEngine = new CronetEngine.Builder(this).enableBrotli(true).build();
   }
 
+  @VisibleForTesting
   public CronetEngine getCronetEngine() {
     return cronetEngine;
   }
