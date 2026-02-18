@@ -273,11 +273,66 @@ public abstract class CallTest {
   }
 
   @Test
+  public void postZeroLengthWithMediaType() throws Exception {
+    server.enqueue(new MockResponse().setBody("abc"));
+
+    Request request =
+        new Request.Builder()
+            .url(server.url("/"))
+            .method("POST", RequestBody.create(MediaType.get("text/plain"), new byte[0]))
+            .build();
+
+    executeSynchronously(request).assertCode(200).assertBody("abc");
+
+    RecordedRequest recordedRequest = server.takeRequest();
+    assertThat(recordedRequest.getMethod()).isEqualTo("POST");
+    assertThat(recordedRequest.getBody().size()).isEqualTo(0);
+    assertThat(recordedRequest.getHeader("Content-Length")).isEqualTo("0");
+    assertThat(recordedRequest.getHeader("Content-Type")).isEqualTo("text/plain");
+  }
+
+  @Test
   public void postWithoutContentType() throws Exception {
     server.setDispatcher(createEchoDispatcher());
 
     Request request =
         new Request.Builder().url(server.url("/")).post(RequestBody.create(null, "{}")).build();
+
+    // Cronet adds a default content type
+    executeSynchronously(request)
+        .assertCode(200)
+        .assertBody("{}")
+        .assertHeader("Content-Type", "application/octet-stream");
+  }
+
+  @Test
+  public void postWithEmptyContentType() throws Exception {
+    server.setDispatcher(createEchoDispatcher());
+
+    Request request =
+        new Request.Builder()
+            .url(server.url("/"))
+            .header("Content-Type", "")
+            .post(RequestBody.create(null, "{}"))
+            .build();
+
+    // Cronet adds a default content type
+    executeSynchronously(request)
+        .assertCode(200)
+        .assertBody("{}")
+        .assertHeader("Content-Type", "application/octet-stream");
+  }
+
+  @Test
+  public void postWithBlankContentType() throws Exception {
+    server.setDispatcher(createEchoDispatcher());
+
+    Request request =
+        new Request.Builder()
+            .url(server.url("/"))
+            .header("Content-Type", "   ")
+            .post(RequestBody.create(null, "{}"))
+            .build();
 
     // Cronet adds a default content type
     executeSynchronously(request)

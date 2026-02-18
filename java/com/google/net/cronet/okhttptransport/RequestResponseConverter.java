@@ -16,11 +16,12 @@
 
 package com.google.net.cronet.okhttptransport;
 
+import android.util.Log;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import java.io.IOException;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Future;
+import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
@@ -32,6 +33,7 @@ final class RequestResponseConverter {
   private static final String CONTENT_LENGTH_HEADER_NAME = "Content-Length";
   private static final String CONTENT_TYPE_HEADER_NAME = "Content-Type";
   private static final String CONTENT_TYPE_HEADER_DEFAULT_VALUE = "application/octet-stream";
+  private static final String TAG = "CronetTransportForOkHttp";
 
   private final CronetEngine cronetEngine;
   private final Executor uploadDataProviderExecutor;
@@ -91,20 +93,32 @@ final class RequestResponseConverter {
     }
 
     RequestBody body = okHttpRequest.body();
-
     if (body != null) {
+      // If provided by the user, set the RequestBody.contentType(). This matches OkHttp behavior.
+      MediaType contentType = body.contentType();
+      if (contentType != null) {
+        builder.addHeader(CONTENT_TYPE_HEADER_NAME, contentType.toString());
+      }
+
       if (okHttpRequest.header(CONTENT_LENGTH_HEADER_NAME) == null && body.contentLength() != -1) {
         builder.addHeader(CONTENT_LENGTH_HEADER_NAME, String.valueOf(body.contentLength()));
       }
 
       if (body.contentLength() != 0) {
-        if (body.contentType() != null) {
-          builder.addHeader(CONTENT_TYPE_HEADER_NAME, body.contentType().toString());
-        } else if (okHttpRequest.header(CONTENT_TYPE_HEADER_NAME) == null) {
-          // Cronet always requires content-type to be present when a body is present. Use a generic
-          // value if one isn't provided.
+        // If UploadDataProvider is set, Cronet requires a non-empty Content-Type header.
+        String contentTypeHeader = okHttpRequest.header(CONTENT_TYPE_HEADER_NAME);
+        if (contentType == null
+            && (contentTypeHeader == null || contentTypeHeader.trim().isEmpty())) {
+          Log.w(
+              TAG,
+              "Cronet OkHttp transport was passed a request body with a missing or empty"
+                  + " Content-Type header. This is not supported by Cronet. Content-Type has been"
+                  + " overridden to \""
+                  + CONTENT_TYPE_HEADER_DEFAULT_VALUE
+                  + "\"",
+              new Exception());
           builder.addHeader(CONTENT_TYPE_HEADER_NAME, CONTENT_TYPE_HEADER_DEFAULT_VALUE);
-        } // else use the header
+        }
 
         builder.setUploadDataProvider(
             requestBodyConverter.convertRequestBody(body, writeTimeoutMillis),

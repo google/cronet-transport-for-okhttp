@@ -156,6 +156,11 @@ list of limitations and features that are not provided by the bridge:
     shouldn't be a concern for typical usage patterns.
   - Generally, while errors convey the same message across plain OkHttp and this
     library, the error message details differ.
+  - When sending a `RequestBody` with null [contentType](https://square.github.io/okhttp/3.x/okhttp/okhttp3/RequestBody.html#contentType--)
+    and not zero [contentLength](https://square.github.io/okhttp/3.x/okhttp/okhttp3/RequestBody.html#contentLength--),
+    missing and empty `Content-Type` headers are overridden to
+    `application/octet-stream` (with a warning to Logcat). This is because
+    Cronet requires a non-empty `Content-Type` on upload.
 
 ### Interceptor incompatibilities
   - `Call` cancellation signals are propagated with a delay.
