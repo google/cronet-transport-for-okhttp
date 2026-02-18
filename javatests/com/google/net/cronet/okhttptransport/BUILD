@@ -71,7 +71,7 @@ android_library(
     srcs = ["CronetInterceptorEndToEndTest.java"],
     deps = [
         "//:okhttp_cronet_transport",
-        "//java/com/google/net/cronet/testing:cronet_engine_test_app_rule",
+        "//javatests/com/google/net/cronet/testing:cronet_engine_test_app_rule",
         "@maven//:androidx_test_core",
         "@maven//:androidx_test_ext_junit",
         "@maven//:androidx_test_runner",  # unuseddeps: keep
@@ -113,8 +113,8 @@ android_library(
     deps = [
         ":cronet_test_helpers",
         "//:okhttp_cronet_transport",
-        "//java/com/google/net/cronet/testing:cronet_engine_test_app_rule",
         "//java/com/google/net/cronet/testing/testapp:embedded_cronet_test_app_lib",
+        "//javatests/com/google/net/cronet/testing:cronet_engine_test_app_rule",
         "//third_party/java/okhttp4:okhttp_tls_android",
         "//third_party/okhttp_tests/javatests/okhttp3:call_test_lib",
         "@maven//:androidx_annotation_annotation",
