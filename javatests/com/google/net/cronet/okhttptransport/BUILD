@@ -1,4 +1,5 @@
-load("@build_bazel_rules_android//android:rules.bzl", "android_binary", "android_instrumentation_test", "android_library", "android_local_test")
+load("@build_bazel_rules_android//android:rules.bzl", "android_binary", "android_library", "android_local_test")
+load("test.bzl", "test")
 
 package(default_applicable_licenses = ["//:license"])
 
@@ -94,9 +95,8 @@ android_binary(
     deps = [":cronet_interceptor_test_lib"],
 )
 
-android_instrumentation_test(
+test(
     name = "CronetInterceptorEndToEndTest",
-    target_device = "@android_test_support//tools/android/emulated_devices/generic_phone:google_36_x86_64",
     test_app = ":cronet_interceptor_test_app",
 )
 
@@ -142,32 +142,36 @@ android_binary(
     ],
 )
 
-android_instrumentation_test(
+test(
     name = "CronetInterceptorCallTest",
     size = "large",
     shard_count = 4,
-    target_device = "@android_test_support//tools/android/emulated_devices/generic_phone:google_36_x86_64",
     test_app = ":call_test_app",
 )
 
-android_instrumentation_test(
+test(
     name = "CronetCallFactoryCallTest",
     size = "large",
     shard_count = 4,
-    target_device = "@android_test_support//tools/android/emulated_devices/generic_phone:google_36_x86_64",
     test_app = ":call_test_app",
 )
 
-android_instrumentation_test(
+test(
     name = "LargeReadBenchmarkTest",
     size = "large",
-    target_device = "@android_test_support//tools/android/emulated_devices/generic_phone:google_36_x86_64",
+    additional_devices = [
+        # This test suite requires API 24+, so run it on the oldest supported version.
+        "google_24_x86_gms_stable",
+    ],
+    excluded_devices = [
+        # On API 23 all tests are skipped and the test runner throws with "No tests found to run".
+        "google_23_x86_gms_stable",
+    ],
     test_app = ":call_test_app",
 )
 
-android_instrumentation_test(
+test(
     name = "ReadIntegrityTest",
     size = "large",
-    target_device = "@android_test_support//tools/android/emulated_devices/generic_phone:google_36_x86_64",
     test_app = ":call_test_app",
 )
