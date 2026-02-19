@@ -19,8 +19,11 @@ package com.google.net.cronet.okhttptransport;
 import static com.google.common.truth.Truth.assertThat;
 
 import android.content.Context;
+import android.os.Build;
 import android.util.Log;
+import androidx.test.filters.SdkSuppress;
 import androidx.test.platform.app.InstrumentationRegistry;
+import com.google.common.io.ByteStreams;
 import com.google.net.cronet.testing.CronetEngineTestAppRule;
 import java.io.IOException;
 import java.io.InputStream;
@@ -84,6 +87,9 @@ import org.junit.runners.Parameterized.Parameters;
  * <p>This benchmark must be run on API 33+ devices because it uses {@link Thread#onSpinWait()}.
  */
 @RunWith(Parameterized.class)
+// This test suite relies on the Network Security Config to trust the test certificates for HTTPS
+// operation. Network Security Config is only supported on Android API 24+.
+@SdkSuppress(minSdkVersion = Build.VERSION_CODES.N)
 public class LargeReadBenchmarkTest {
 
   @Rule public final MockWebServer server = new MockWebServer();
@@ -162,7 +168,7 @@ public class LargeReadBenchmarkTest {
 
     final PrivateKey privateKey;
     try (InputStream keyIs = context.getResources().openRawResource(R.raw.localhost_key)) {
-      PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(keyIs.readAllBytes());
+      PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(ByteStreams.toByteArray(keyIs));
       privateKey = KeyFactory.getInstance("RSA").generatePrivate(keySpec);
     }
 
@@ -271,7 +277,7 @@ public class LargeReadBenchmarkTest {
     private void doWork() {
       long startNs = System.nanoTime();
       while (System.nanoTime() - startNs < workDurationUs * 1000) {
-        Thread.onSpinWait();
+        // Ideally we should call Thread#onSpinWait() here, but that requires API 33+.
       }
     }
 

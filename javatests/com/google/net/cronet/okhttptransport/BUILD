@@ -121,6 +121,7 @@ android_library(
         "@maven//:androidx_test_core",
         "@maven//:androidx_test_ext_junit",
         "@maven//:androidx_test_runner",  # unuseddeps: keep
+        "@maven//:com_google_guava_guava",  # :io,
         "@maven//:com_google_truth_truth",
         "@maven//:com_squareup_okhttp3_mockwebserver",
         "@maven//:com_squareup_okhttp3_okhttp",
