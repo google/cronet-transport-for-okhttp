@@ -8,7 +8,6 @@ android_binary(
     name = "okhttp_cronet_transport_sample",
     srcs = glob(["*.java"]),
     manifest = "AndroidManifest.xml",
-    multidex = "legacy",
     resource_files = glob(["res/**"]),
     deps = [
         "//:okhttp_cronet_transport",

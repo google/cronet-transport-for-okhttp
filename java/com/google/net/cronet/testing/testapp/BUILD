@@ -26,7 +26,6 @@ android_binary(
     name = "embedded_cronet_test_app",
     testonly = 1,
     manifest = "AndroidManifest.xml",
-    multidex = "native",
     deps = [
         ":embedded_cronet_test_app_lib",
     ],

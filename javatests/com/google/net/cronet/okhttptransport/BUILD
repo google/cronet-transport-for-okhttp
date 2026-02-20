@@ -91,7 +91,6 @@ android_binary(
     testonly = 1,
     instruments = "//java/com/google/net/cronet/testing/testapp:embedded_cronet_test_app",
     manifest = "InstrumentationTestManifest.xml",
-    multidex = "native",
     deps = [":cronet_interceptor_test_lib"],
 )
 
@@ -136,7 +135,6 @@ android_binary(
     testonly = 1,
     instruments = "//java/com/google/net/cronet/testing/testapp:embedded_cronet_test_app",
     manifest = "InstrumentationTestManifest.xml",
-    multidex = "native",
     deps = [
         ":call_tests",
     ],
