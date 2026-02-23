@@ -46,7 +46,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.Deflater;
 import javax.annotation.Nullable;
-import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
@@ -293,88 +292,102 @@ public abstract class CallTest {
 
   @Test
   public void postWithoutContentType() throws Exception {
-    server.setDispatcher(createEchoDispatcher());
+    server.enqueue(new MockResponse().setBody("test_response_body"));
 
     Request request =
-        new Request.Builder().url(server.url("/")).post(RequestBody.create(null, "{}")).build();
+        new Request.Builder()
+            .url(server.url("/"))
+            .post(RequestBody.create(null, "test_request_body"))
+            .build();
 
-    // Cronet adds a default content type
-    executeSynchronously(request)
-        .assertCode(200)
-        .assertBody("{}")
-        .assertHeader("Content-Type", "application/octet-stream");
+    executeSynchronously(request).assertCode(200).assertBody("test_response_body");
+
+    RecordedRequest recordedRequest = server.takeRequest();
+    assertThat(recordedRequest.getMethod()).isEqualTo("POST");
+    assertThat(recordedRequest.getBody().readUtf8()).isEqualTo("test_request_body");
+    assertThat(recordedRequest.getHeader("Content-Length")).isEqualTo("17");
+    assertThat(recordedRequest.getHeader("Content-Type")).isEqualTo("application/octet-stream");
   }
 
   @Test
   public void postWithEmptyContentType() throws Exception {
-    server.setDispatcher(createEchoDispatcher());
+    server.enqueue(new MockResponse().setBody("test_response_body"));
 
     Request request =
         new Request.Builder()
             .url(server.url("/"))
             .header("Content-Type", "")
-            .post(RequestBody.create(null, "{}"))
+            .post(RequestBody.create(null, "test_request_body"))
             .build();
 
-    // Cronet adds a default content type
-    executeSynchronously(request)
-        .assertCode(200)
-        .assertBody("{}")
-        .assertHeader("Content-Type", "application/octet-stream");
+    executeSynchronously(request).assertCode(200).assertBody("test_response_body");
+
+    RecordedRequest recordedRequest = server.takeRequest();
+    assertThat(recordedRequest.getMethod()).isEqualTo("POST");
+    assertThat(recordedRequest.getBody().readUtf8()).isEqualTo("test_request_body");
+    assertThat(recordedRequest.getHeader("Content-Length")).isEqualTo("17");
+    assertThat(recordedRequest.getHeader("Content-Type")).isEqualTo("application/octet-stream");
   }
 
   @Test
   public void postWithBlankContentType() throws Exception {
-    server.setDispatcher(createEchoDispatcher());
+    server.enqueue(new MockResponse().setBody("test_response_body"));
 
     Request request =
         new Request.Builder()
             .url(server.url("/"))
             .header("Content-Type", "   ")
-            .post(RequestBody.create(null, "{}"))
+            .post(RequestBody.create(null, "test_request_body"))
             .build();
 
-    // Cronet adds a default content type
-    executeSynchronously(request)
-        .assertCode(200)
-        .assertBody("{}")
-        .assertHeader("Content-Type", "application/octet-stream");
+    executeSynchronously(request).assertCode(200).assertBody("test_response_body");
+
+    RecordedRequest recordedRequest = server.takeRequest();
+    assertThat(recordedRequest.getMethod()).isEqualTo("POST");
+    assertThat(recordedRequest.getBody().readUtf8()).isEqualTo("test_request_body");
+    assertThat(recordedRequest.getHeader("Content-Length")).isEqualTo("17");
+    assertThat(recordedRequest.getHeader("Content-Type")).isEqualTo("application/octet-stream");
   }
 
   @Test
   public void postWithCustomContentTypeHeader() throws Exception {
-    server.setDispatcher(createEchoDispatcher());
+    server.enqueue(new MockResponse().setBody("test_response_body"));
 
     Request request =
         new Request.Builder()
             .url(server.url("/"))
             .header("Content-Type", "foo/bar")
-            .post(RequestBody.create(null, "{}"))
+            .post(RequestBody.create(null, "test_request_body"))
             .build();
 
-    // The Content-Type header is preserved
-    executeSynchronously(request)
-        .assertCode(200)
-        .assertBody("{}")
-        .assertHeader("Content-Type", "foo/bar");
+    executeSynchronously(request).assertCode(200).assertBody("test_response_body");
+
+    RecordedRequest recordedRequest = server.takeRequest();
+    assertThat(recordedRequest.getMethod()).isEqualTo("POST");
+    assertThat(recordedRequest.getBody().readUtf8()).isEqualTo("test_request_body");
+    assertThat(recordedRequest.getHeader("Content-Length")).isEqualTo("17");
+    assertThat(recordedRequest.getHeader("Content-Type")).isEqualTo("foo/bar");
   }
 
   @Test
   public void postWithContentTypeSetInHeaderAndMediaType() throws Exception {
-    server.setDispatcher(createEchoDispatcher());
+    server.enqueue(new MockResponse().setBody("test_response_body"));
 
     Request request =
         new Request.Builder()
             .url(server.url("/"))
-            .post(RequestBody.create(MediaType.parse("application/json"), "{}"))
+            .post(RequestBody.create(MediaType.parse("application/json"), "test_request_body"))
             .header("Content-Type", "foo/bar")
             .build();
 
-    // The media type content type gets precedence
-    executeSynchronously(request)
-        .assertCode(200)
-        .assertBody("{}")
-        .assertHeader("Content-Type", "application/json; charset=utf-8");
+    executeSynchronously(request).assertCode(200).assertBody("test_response_body");
+
+    RecordedRequest recordedRequest = server.takeRequest();
+    assertThat(recordedRequest.getMethod()).isEqualTo("POST");
+    assertThat(recordedRequest.getBody().readUtf8()).isEqualTo("test_request_body");
+    assertThat(recordedRequest.getHeader("Content-Length")).isEqualTo("17");
+    assertThat(recordedRequest.getHeader("Content-Type"))
+        .isEqualTo("application/json; charset=utf-8");
   }
 
   @Test
@@ -1875,17 +1888,5 @@ public abstract class CallTest {
         };
     thread.start();
     return thread;
-  }
-
-  private static Dispatcher createEchoDispatcher() {
-    return new Dispatcher() {
-      @Override
-      public MockResponse dispatch(RecordedRequest request) {
-        return new MockResponse()
-            .setBody(request.getBody())
-            .addHeader("Content-Type", request.getHeader("Content-Type"));
-      }
-      ;
-    };
   }
 }
