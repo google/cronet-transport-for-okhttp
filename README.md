@@ -161,6 +161,8 @@ list of limitations and features that are not provided by the bridge:
     missing and empty `Content-Type` headers are overridden to
     `application/octet-stream` (with a warning to Logcat). This is because
     Cronet requires a non-empty `Content-Type` on upload.
+  - The WebSocket protocol is not supported by Cronet, and therefore is not
+    supported by this library either.
 
 ### Interceptor incompatibilities
   - `Call` cancellation signals are propagated with a delay.
