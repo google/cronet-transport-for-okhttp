@@ -5,6 +5,8 @@ This package allows OkHttp and Retrofit users to use
 as their transport layer, benefiting from features like QUIC/HTTP3 support and
 connection migration.
 
+**[API reference docs](https://developer.android.com/develop/connectivity/cronet/okhttp/reference/com/google/net/cronet/okhttptransport/package-summary)**
+
 ## First steps
 
 ### Installation
