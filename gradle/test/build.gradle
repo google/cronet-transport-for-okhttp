@@ -27,7 +27,7 @@ android {
 
 dependencies {
   implementation 'com.google.android.gms:play-services-cronet:18.0.1'
-  androidTestImplementation 'com.google.net.cronet:cronet-okhttp:0.1.0'
+  androidTestImplementation 'com.google.net.cronet:cronet-okhttp:0.1.1'
   androidTestImplementation 'com.google.truth:truth:1.1.3'
   androidTestImplementation 'androidx.test:core:1.7.0'
   androidTestImplementation 'androidx.test:runner:1.7.0'
