@@ -43,7 +43,7 @@ In order to use the Play Services Cronet provider, add the following dependency
 to your project:
 
 ```
-implementation "com.google.android.gms:play-services-cronet:18.0.1"
+implementation "com.google.android.gms:play-services-cronet:18.1.1"
 ```
 
 Before creating a Cronet engine, you also need to initialize the bindings
