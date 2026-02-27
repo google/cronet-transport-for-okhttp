@@ -37,7 +37,7 @@ android_local_test(
         "//:okhttp_cronet_transport",
         "@maven//:androidx_annotation_annotation",
         "@maven//:androidx_test_ext_junit",
-        "@maven//:com_google_guava_guava",  # :base,
+        "@maven//:com_google_guava_guava",  # :base,:concurrent,
         "@maven//:com_google_truth_truth",
         "@maven//:com_squareup_okhttp3_okhttp",
         "@maven//:com_squareup_okio_okio",

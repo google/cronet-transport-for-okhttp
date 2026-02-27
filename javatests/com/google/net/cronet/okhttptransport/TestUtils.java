@@ -31,4 +31,14 @@ final class TestUtils {
 
     return buffer;
   }
+
+  /**
+   * Generates an array with random bytes.
+   *
+   * @param byteCount The number of bytes to generate.
+   * @return An array with random bytes.
+   */
+  static byte[] generateRandomBytesArray(int byteCount) {
+    return generateRandomBytes(byteCount).readByteArray();
+  }
 }
