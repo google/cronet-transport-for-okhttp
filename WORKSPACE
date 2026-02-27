@@ -39,8 +39,8 @@ maven_install(
         "com.squareup.okhttp3:okhttp-tls:3.12.13",
         "com.squareup.okio:okio:2.10.0",
         # Cronet
-        "org.chromium.net:cronet-api:98.4758.101",
-        "org.chromium.net:cronet-embedded:98.4758.101",
+        "org.chromium.net:cronet-api:143.7445.0",
+        "org.chromium.net:cronet-embedded:143.7445.0",
         # Implementation dependencies
         "com.google.guava:guava:31.1-android",
         "com.google.code.findbugs:jsr305:3.0.2",
