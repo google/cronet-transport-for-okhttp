@@ -92,19 +92,6 @@ final class UploadBodyDataBroker implements Sink {
   }
 
   /**
-   * Signals that reading the body has ended and no future bytes will be sent.
-   *
-   * <p>This method is executed by the background OkHttp body reading thread.
-   */
-  void handleEndOfStreamSignal() throws IOException {
-    if (isClosed.getAndSet(true)) {
-      throw new IllegalStateException("Already closed");
-    }
-
-    getPendingCronetRead().second.set(ReadResult.END_OF_BODY);
-  }
-
-  /**
    * {@inheritDoc}
    *
    * <p>This method is executed by the background OkHttp body reading thread.
@@ -153,9 +140,19 @@ final class UploadBodyDataBroker implements Sink {
     }
   }
 
+  /**
+   * Signals that we're done writing the request body and no future bytes will be sent.
+   *
+   * <p>This method is idempotent. Upon the first call, this will signal Cronet that we're done
+   * writing the request body. Subsequent calls are no-ops. It is crucial to call close() at least
+   * once. Otherwise, Cronet will be stuck waiting for more data to come, which will eventually
+   * result in a timeout.
+   */
   @Override
-  public void close() {
-    isClosed.set(true);
+  public void close() throws IOException {
+    if (!isClosed.getAndSet(true)) {
+      getPendingCronetRead().second.set(ReadResult.END_OF_BODY);
+    }
   }
 
   @Override

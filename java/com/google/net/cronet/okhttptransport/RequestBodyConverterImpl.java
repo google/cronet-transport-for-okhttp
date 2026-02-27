@@ -216,6 +216,18 @@ final class RequestBodyConverterImpl implements RequestBodyConverter {
         }
       }
 
+      /**
+       * Starts a background task to write OkHttp's request body to Cronet.
+       *
+       * <p>Calling this method will start a background task in which OkHttp will start writing the
+       * request body to Cronet.
+       *
+       * <p>This method is idempotent. Calling it more than once has no effect. It is crucial,
+       * however, to ensure it is called at least once - otherwise the request body will never be
+       * written to Cronet.
+       *
+       * <p>This method is not thread-safe and is not expected to be called concurrently.
+       */
       private void ensureReadTaskStarted() {
         // We don't expect concurrent calls so a simple flag is sufficient
         if (readTaskFuture == null) {
@@ -225,8 +237,17 @@ final class RequestBodyConverterImpl implements RequestBodyConverter {
                       () -> {
                         BufferedSink bufferedSink = Okio.buffer(broker);
                         okHttpRequestBody.writeTo(bufferedSink);
-                        bufferedSink.flush();
-                        broker.handleEndOfStreamSignal();
+                        // The user (RequestBody#writeTo) is done writing the request body.
+                        // At this point, the user might or might not have closed the sink.
+                        // Assume the sink might be already closed, so flush() cannot be called.
+
+                        // Close the sink. Upon the first call, close() will flush any
+                        // bytes remaining in the buffer, and will signal Cronet that we're done
+                        // writing the request body. Subsequent calls are no-ops. It is crucial to
+                        // call close() at least once. Otherwise, Cronet will be stuck waiting for
+                        // more data to come, which will never come. This will result in a timeout.
+                        bufferedSink.close();
+
                         return null;
                       });
 
@@ -308,7 +329,12 @@ final class RequestBodyConverterImpl implements RequestBodyConverter {
           // We're not expecting any concurrent calls here so a simple flag should be sufficient.
           if (!isMaterialized) {
             requestBody.writeTo(materializedBody);
-            materializedBody.flush();
+            // The user (RequestBody#writeTo) is done writing the request body.
+            // At this point, the user might or might not have attempted to close the sink.
+            // However, since we're using an okio.Buffer, it doesn't matter. Because okio.Buffer
+            // is an in-memory buffer, and calling close() on it is a no-op. Furthermore, we don't
+            // need to flush() the buffer, because it is already in memory.
+
             isMaterialized = true;
             long reportedLength = getLength();
             long actualLength = materializedBody.size();

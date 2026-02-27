@@ -177,6 +177,41 @@ public class RequestBodyConverterTest {
     assertThat(readAll(provider)).isEqualTo(content);
   }
 
+  @Test
+  public void testInMemory_knownLength_closeSinkAfterWrite() throws Exception {
+    RequestBodyConverter converter = new InMemoryRequestBodyConverter();
+
+    byte[] content = TestUtils.generateRandomBytesArray(KB_56);
+    RequestBody requestBody = new TestRequestBody(content, content.length, true);
+    UploadDataProvider provider = converter.convertRequestBody(requestBody, NO_TIMEOUT);
+
+    assertThat(readAll(provider)).isEqualTo(content);
+  }
+
+  @Test
+  public void testStreaming_unknownLength_closeSinkAfterWrite() throws Exception {
+    RequestBodyConverter converter =
+        new StreamingRequestBodyConverter(Executors.newSingleThreadExecutor());
+
+    byte[] content = TestUtils.generateRandomBytesArray(KB_56);
+    RequestBody requestBody = new TestRequestBody(content, -1, true);
+    UploadDataProvider provider = converter.convertRequestBody(requestBody, NO_TIMEOUT);
+
+    assertThat(readAll(provider)).isEqualTo(content);
+  }
+
+  @Test
+  public void testStreaming_knownLength_closeSinkAfterWrite() throws Exception {
+    RequestBodyConverter converter =
+        new StreamingRequestBodyConverter(Executors.newSingleThreadExecutor());
+
+    byte[] content = TestUtils.generateRandomBytesArray(KB_56);
+    RequestBody requestBody = new TestRequestBody(content, content.length, true);
+    UploadDataProvider provider = converter.convertRequestBody(requestBody, NO_TIMEOUT);
+
+    assertThat(readAll(provider)).isEqualTo(content);
+  }
+
   /**
    * Reads the entire body from the given {@link UploadDataProvider} and returns it as a byte array.
    */
@@ -212,14 +247,20 @@ public class RequestBodyConverterTest {
 
     private final byte[] content;
     private final long contentLength;
+    private final boolean closeSinkAfterWrite;
 
     TestRequestBody(byte[] content) {
-      this(content, content.length);
+      this(content, content.length, false);
     }
 
     TestRequestBody(byte[] content, long contentLength) {
+      this(content, contentLength, false);
+    }
+
+    TestRequestBody(byte[] content, long contentLength, boolean closeSinkAfterWrite) {
       this.content = content;
       this.contentLength = contentLength;
+      this.closeSinkAfterWrite = closeSinkAfterWrite;
     }
 
     @Override
@@ -235,6 +276,9 @@ public class RequestBodyConverterTest {
     @Override
     public void writeTo(BufferedSink sink) throws IOException {
       sink.write(content);
+      if (closeSinkAfterWrite) {
+        sink.close();
+      }
     }
   }
 
