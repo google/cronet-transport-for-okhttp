@@ -139,23 +139,29 @@ final class ResponseConverter {
       contentLengthString = getLastHeaderValue(CONTENT_LENGTH_HEADER_NAME, cronetResponseInfo);
     }
 
-    ResponseBody responseBody = null;
+    responseBuilder
+        .request(request)
+        .code(cronetResponseInfo.getHttpStatusCode())
+        .message(cronetResponseInfo.getHttpStatusText())
+        .protocol(convertProtocol(cronetResponseInfo.getNegotiatedProtocol()));
+
+    // See https://github.com/google/cronet-transport-for-okhttp/issues/52
+    // For compatibility with older and newer versions of OkHttp, if there's no response body, don't
+    // set anything at all into the response builder. This will allow it to keep the correct default
+    // value for the OkHttp version in use. This will be null for OkHttp 4, and ResponseBody.EMPTY
+    // for OkHttp 5.
+    // TODO: This comment can be removed after we start depending on OkHttp 5.
     if (bodySource != null) {
-      responseBody =
+      ResponseBody responseBody =
           createResponseBody(
               request,
               cronetResponseInfo.getHttpStatusCode(),
               contentType,
               contentLengthString,
               bodySource);
-    }
 
-    responseBuilder
-        .request(request)
-        .code(cronetResponseInfo.getHttpStatusCode())
-        .message(cronetResponseInfo.getHttpStatusText())
-        .protocol(convertProtocol(cronetResponseInfo.getNegotiatedProtocol()))
-        .body(responseBody);
+      responseBuilder.body(responseBody);
+    }
 
     for (Map.Entry<String, String> header : cronetResponseInfo.getAllHeadersAsList()) {
       boolean copyHeader = true;
