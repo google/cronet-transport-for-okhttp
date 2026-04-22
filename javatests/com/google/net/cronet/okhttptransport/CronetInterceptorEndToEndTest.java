@@ -229,6 +229,50 @@ public class CronetInterceptorEndToEndTest {
   }
 
   @Test
+  public void testRedirectStrategy_with307Redirect_replaysSmallPostBody() throws Exception {
+    byte[] redirectBody = "Replay this body".getBytes(UTF_8);
+    server.setDispatcher(
+        new Dispatcher() {
+          @Override
+          public MockResponse dispatch(RecordedRequest request) {
+            if (request.getRequestUrl().encodedPath().equals("/start")) {
+              return new MockResponse().setResponseCode(307).addHeader("Location", "/redirected");
+            }
+            return ECHO_RESPONSE_DISPATCHER.dispatch(request);
+          }
+        });
+
+    OkHttpClient client = new OkHttpClient.Builder().addInterceptor(underTest).build();
+
+    Request request =
+        new Request.Builder()
+            .post(RequestBody.create(UTF_8_TEXT, redirectBody))
+            .url(server.url("/start"))
+            .build();
+
+    try (Response response = client.newCall(request).execute()) {
+      assertThat(response.protocol()).isEqualTo(Protocol.HTTP_1_0);
+      assertThat(response.code()).isEqualTo(200);
+      assertThat(response.request().url().encodedPath()).isEqualTo("/redirected");
+      assertThat(response.priorResponse().request().url().encodedPath()).isEqualTo("/start");
+      assertThat(response.headers("x-request-http-method")).containsExactly("POST");
+      assertThat(response.body().bytes()).isEqualTo(redirectBody);
+    }
+
+    RecordedRequest initialRequest = server.takeRequest(5, SECONDS);
+    assertThat(initialRequest).isNotNull();
+    assertThat(initialRequest.getPath()).isEqualTo("/start");
+    assertThat(initialRequest.getMethod()).isEqualTo("POST");
+    assertThat(initialRequest.getBody().readByteArray()).isEqualTo(redirectBody);
+
+    RecordedRequest redirectedRequest = server.takeRequest(5, SECONDS);
+    assertThat(redirectedRequest).isNotNull();
+    assertThat(redirectedRequest.getPath()).isEqualTo("/redirected");
+    assertThat(redirectedRequest.getMethod()).isEqualTo("POST");
+    assertThat(redirectedRequest.getBody().readByteArray()).isEqualTo(redirectBody);
+  }
+
+  @Test
   public void testRedirectStrategy_withRedirects_cycle() throws Exception {
     for (int i = 0; i < 9; i++) {
       server.enqueue(

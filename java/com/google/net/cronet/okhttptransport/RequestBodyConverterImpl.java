@@ -316,8 +316,8 @@ final class RequestBodyConverterImpl implements RequestBodyConverter {
       }
 
       return new UploadDataProvider() {
-        private volatile boolean isMaterialized = false;
-        private final Buffer materializedBody = new Buffer();
+        private byte[] materializedBody;
+        private int nextByteToRead;
 
         @Override
         public long getLength() {
@@ -326,35 +326,49 @@ final class RequestBodyConverterImpl implements RequestBodyConverter {
 
         @Override
         public void read(UploadDataSink uploadDataSink, ByteBuffer byteBuffer) throws IOException {
-          // We're not expecting any concurrent calls here so a simple flag should be sufficient.
-          if (!isMaterialized) {
-            requestBody.writeTo(materializedBody);
-            // The user (RequestBody#writeTo) is done writing the request body.
-            // At this point, the user might or might not have attempted to close the sink.
-            // However, since we're using an okio.Buffer, it doesn't matter. Because okio.Buffer
-            // is an in-memory buffer, and calling close() on it is a no-op. Furthermore, we don't
-            // need to flush() the buffer, because it is already in memory.
+          ensureMaterialized();
 
-            isMaterialized = true;
-            long reportedLength = getLength();
-            long actualLength = materializedBody.size();
-            if (actualLength != reportedLength) {
-              throw new IOException(
-                  "Expected " + reportedLength + " bytes but got " + actualLength);
-            }
-          }
-          if (materializedBody.read(byteBuffer) == -1) {
+          byte[] body = Verify.verifyNotNull(materializedBody);
+          int bytesRemaining = body.length - nextByteToRead;
+          if (bytesRemaining == 0) {
             // This should never happen - for known body length we shouldn't be called at all
             // if there's no more data to read.
             throw new IllegalStateException("The source has been exhausted but we expected more!");
           }
+
+          int bytesToRead = Math.min(byteBuffer.remaining(), bytesRemaining);
+          byteBuffer.put(body, nextByteToRead, bytesToRead);
+          nextByteToRead += bytesToRead;
+
           uploadDataSink.onReadSucceeded(false);
         }
 
         @Override
         public void rewind(UploadDataSink uploadDataSink) {
-          // TODO(danstahr): OkHttp 4 can use isOneShot flag here and rewind safely.
-          uploadDataSink.onRewindError(new UnsupportedOperationException());
+          nextByteToRead = 0;
+          uploadDataSink.onRewindSucceeded();
+        }
+
+        private void ensureMaterialized() throws IOException {
+          if (materializedBody != null) {
+            return;
+          }
+
+          Buffer buffer = new Buffer();
+          requestBody.writeTo(buffer);
+          // The user (RequestBody#writeTo) is done writing the request body.
+          // At this point, the user might or might not have attempted to close the sink.
+          // However, since we're using an okio.Buffer, it doesn't matter. Because okio.Buffer
+          // is an in-memory buffer, and calling close() on it is a no-op. Furthermore, we don't
+          // need to flush() the buffer, because it is already in memory.
+
+          long reportedLength = getLength();
+          long actualLength = buffer.size();
+          if (actualLength != reportedLength) {
+            throw new IOException("Expected " + reportedLength + " bytes but got " + actualLength);
+          }
+
+          materializedBody = buffer.readByteArray();
         }
       };
     }

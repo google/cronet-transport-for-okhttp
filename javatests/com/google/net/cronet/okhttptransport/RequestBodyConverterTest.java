@@ -189,6 +189,21 @@ public class RequestBodyConverterTest {
   }
 
   @Test
+  public void testInMemory_knownLength_rewindReplaysBodyWithoutRewritingRequestBody()
+      throws Exception {
+    RequestBodyConverter converter = new InMemoryRequestBodyConverter();
+
+    byte[] content = TestUtils.generateRandomBytesArray(KB_56);
+    TestRequestBody requestBody = new TestRequestBody(content);
+    UploadDataProvider provider = converter.convertRequestBody(requestBody, NO_TIMEOUT);
+
+    assertThat(readAll(provider)).isEqualTo(content);
+    rewind(provider);
+    assertThat(readAll(provider)).isEqualTo(content);
+    assertThat(requestBody.getWriteCount()).isEqualTo(1);
+  }
+
+  @Test
   public void testStreaming_unknownLength_closeSinkAfterWrite() throws Exception {
     RequestBodyConverter converter =
         new StreamingRequestBodyConverter(Executors.newSingleThreadExecutor());
@@ -243,11 +258,18 @@ public class RequestBodyConverterTest {
     return buffer.readByteArray();
   }
 
+  private static void rewind(UploadDataProvider uploadDataProvider) throws Exception {
+    TestUploadDataSink sink = new TestUploadDataSink();
+    uploadDataProvider.rewind(sink);
+    sink.waitForRewindCallback();
+  }
+
   private static final class TestRequestBody extends RequestBody {
 
     private final byte[] content;
     private final long contentLength;
     private final boolean closeSinkAfterWrite;
+    private int writeCount;
 
     TestRequestBody(byte[] content) {
       this(content, content.length, false);
@@ -275,25 +297,31 @@ public class RequestBodyConverterTest {
 
     @Override
     public void writeTo(BufferedSink sink) throws IOException {
+      writeCount++;
       sink.write(content);
       if (closeSinkAfterWrite) {
         sink.close();
       }
     }
+
+    private int getWriteCount() {
+      return writeCount;
+    }
   }
 
   private static final class TestUploadDataSink extends UploadDataSink {
 
-    private final SettableFuture<Boolean> result = SettableFuture.create();
+    private final SettableFuture<Boolean> readResult = SettableFuture.create();
+    private final SettableFuture<Void> rewindResult = SettableFuture.create();
 
     @Override
     public void onReadSucceeded(boolean finalChunk) {
-      result.set(finalChunk);
+      readResult.set(finalChunk);
     }
 
     @Override
     public void onReadError(Exception exception) {
-      result.setException(exception);
+      readResult.setException(exception);
     }
 
     /**
@@ -301,17 +329,21 @@ public class RequestBodyConverterTest {
      * and returns the value of {@code finalChunk} from {@code onReadSucceeded}.
      */
     private boolean waitForCallback() throws ExecutionException {
-      return Uninterruptibles.getUninterruptibly(result);
+      return Uninterruptibles.getUninterruptibly(readResult);
     }
 
     @Override
     public void onRewindSucceeded() {
-      throw new UnsupportedOperationException();
+      rewindResult.set(null);
     }
 
     @Override
     public void onRewindError(Exception exception) {
-      throw new UnsupportedOperationException();
+      rewindResult.setException(exception);
+    }
+
+    private void waitForRewindCallback() throws ExecutionException {
+      Uninterruptibles.getUninterruptibly(rewindResult);
     }
   }
 }
