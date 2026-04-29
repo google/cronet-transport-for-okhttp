@@ -1,8 +1,8 @@
 # Cronet Transport for OkHttp and Retrofit
 
 This package allows OkHttp and Retrofit users to use
-[Cronet](https://developer.android.com/guide/topics/connectivity/cronet)
-as their transport layer, benefiting from features like QUIC/HTTP3 support and
+[Cronet](https://developer.android.com/guide/topics/connectivity/cronet) as
+their transport layer, benefiting from features like QUIC/HTTP3 support and
 connection migration.
 
 **[API reference docs](https://developer.android.com/develop/connectivity/cronet/okhttp/reference/com/google/net/cronet/okhttptransport/package-summary)**
@@ -12,8 +12,8 @@ connection migration.
 ### Installation
 
 The easiest way to import this library is to include it as a Gradle dependency
-in your app's `build.gradle` file. Simply add the following line and specify
-the desired version. The available VERSION can be found in the
+in your app's `build.gradle` file. Simply add the following line and specify the
+desired version. The available VERSION can be found in the
 [Google Maven Repo](https://maven.google.com/web/index.html#com.google.net.cronet:cronet-okhttp)
 eg `0.1.1`.
 
@@ -34,9 +34,9 @@ to initialize this library.
 We recommend using a Google Play Services provider which loads Cronet
 implementation from the platform. This way the application doesn't need to pay
 the binary size cost of carrying Cronet and the platform ensures that the latest
-updates and security fixes are delivered. We also recommend falling back
-on using plain OkHttp if the platform-wide Cronet isn't available (e.g. because
-the device doesn't integrate with Google Play Services, or the platform has been
+updates and security fixes are delivered. We also recommend falling back on
+using plain OkHttp if the platform-wide Cronet isn't available (e.g. because the
+device doesn't integrate with Google Play Services, or the platform has been
 tampered with).
 
 In order to use the Play Services Cronet provider, add the following dependency
@@ -53,8 +53,8 @@ between your application and Google Play Services by calling
 CronetProviderInstaller.installProvider(context);
 ```
 
-Note that the `installProvider` call is asynchronous. We omit handling
-of failures and synchronization here for brevity - check the
+Note that the `installProvider` call is asynchronous. We omit handling of
+failures and synchronization here for brevity - check the
 [sample application provided with the library](java/com/google/samples/cronet/okhttptransport/HttpClientHolder.java)
 for an example which is more appropriate for production use.
 
@@ -71,9 +71,9 @@ CronetEngine cronetEngine = new CronetEngine.Builder(context).build();
 There are two ways to use this library — either as an OkHttp application
 interceptor, or as a `Call` factory.
 
-If your application makes extensive use of application interceptors,
-using the library as an interceptor will be more practical as you can keep
-your current interceptor logic. Just add an extra interceptor to your client.
+If your application makes extensive use of application interceptors, using the
+library as an interceptor will be more practical as you can keep your current
+interceptor logic. Just add an extra interceptor to your client.
 
 > **Note**: Add the Cronet interceptor last, otherwise the subsequent
 > interceptors will be skipped.
@@ -120,6 +120,7 @@ Retrofit retrofit = new Retrofit.Builder()
 ```
 
 ## Configuration
+
 The transport libraries are configured in two ways. The builders for both the
 interceptor and the call factory provide configuration options which directly
 affect how the interop layer behaves. Most of the network configuration
@@ -127,56 +128,61 @@ affect how the interop layer behaves. Most of the network configuration
 engine.
 
 We're open to providing convenience utilities which will simplify configuring
-the Cronet engine — please reach out and tell us more about your use case
-if this sounds interesting!
+the Cronet engine — please reach out and tell us more about your use case if
+this sounds interesting!
 
 ## Incompatibilities
 
-While our design principle is to implement the full set of OkHttp APIs
-on top of Cronet, it's not always possible due to limitations and/or
-fundamental incompatibilities of the two layers. We are aware of the following
-list of limitations and features that are not provided by the bridge:
+While our design principle is to implement the full set of OkHttp APIs on top of
+Cronet, it's not always possible due to limitations and/or fundamental
+incompatibilities of the two layers. We are aware of the following list of
+limitations and features that are not provided by the bridge:
 
 ### Common incompatibilities
-  - The entirety of OkHttp core is bypassed. This includes caching, retries,
+
+-   The entirety of OkHttp core is bypassed. This includes caching, retries,
     authentication, and network interceptors. These features have to be enabled
     directly on the Cronet engine or built on top of this library.
-  - It's not possible to set multiple values for a single header key in outgoing
+-   It's not possible to set multiple values for a single header key in outgoing
     requests, Cronet uses the last value provided.
-  - `Accept-Encoding` are automatically populated by Cronet based on the engine
+-   `Accept-Encoding` are automatically populated by Cronet based on the engine
     configuration. Custom values are ignored.
-  - The `Response` object doesn't have the following fields set:
-    - `handshake`
-    - `networkResponse`
-    - `cacheResponse`
-    - `sentRequestAtMillis` / `receivedResponseAtMillis`
-  - The `Request` field under `Response` is set as seen by the outmost layer and
+-   The `Response` object doesn't have the following fields set:
+    -   `handshake`
+    -   `networkResponse`
+    -   `cacheResponse`
+    -   `sentRequestAtMillis` / `receivedResponseAtMillis`
+-   The `Request` field under `Response` is set as seen by the outmost layer and
     doesn't reflect internal Cronet transformations.
-  - Response parsing logic is different at places. Generally, Cronet is more
+-   Response parsing logic is different at places. Generally, Cronet is more
     lenient and will silently drop headers/fall back to default values where
     OkHttp might throw an exception (for example, parsing status codes). This
     shouldn't be a concern for typical usage patterns.
-  - Generally, while errors convey the same message across plain OkHttp and this
+-   Generally, while errors convey the same message across plain OkHttp and this
     library, the error message details differ.
-  - When sending a `RequestBody` with null [contentType](https://square.github.io/okhttp/3.x/okhttp/okhttp3/RequestBody.html#contentType--)
-    and not zero [contentLength](https://square.github.io/okhttp/3.x/okhttp/okhttp3/RequestBody.html#contentLength--),
+-   When sending a `RequestBody` with null
+    [contentType](https://square.github.io/okhttp/3.x/okhttp/okhttp3/RequestBody.html#contentType--)
+    and not zero
+    [contentLength](https://square.github.io/okhttp/3.x/okhttp/okhttp3/RequestBody.html#contentLength--),
     missing and empty `Content-Type` headers are overridden to
     `application/octet-stream` (with a warning to Logcat). This is because
     Cronet requires a non-empty `Content-Type` on upload.
-  - The WebSocket protocol is not supported by Cronet, and therefore is not
+-   The WebSocket protocol is not supported by Cronet, and therefore is not
     supported by this library either.
 
 ### Interceptor incompatibilities
-  - `Call` cancellation signals are propagated with a delay.
-  - If the Cronet interceptor isn't the last application interceptor, the
+
+-   `Call` cancellation signals are propagated with a delay.
+-   If the Cronet interceptor isn't the last application interceptor, the
     subsequent interceptors are bypassed.
-  - Most of the `OkHttpClient` network-related configuration which is handled
-    by the core network logic is bypassed and has to be reconfigured directly
-    on your `CronetEngine` builder.
-  - Intermediate `EventListener` stages are not being reported.
+-   Most of the `OkHttpClient` network-related configuration which is handled by
+    the core network logic is bypassed and has to be reconfigured directly on
+    your `CronetEngine` builder.
+-   Intermediate `EventListener` stages are not being reported.
 
 ### Call factory incompatibilities
-  - `OkHttpClient` configuration is unavailable and bypassed completely.
+
+-   `OkHttpClient` configuration is unavailable and bypassed completely.
 
 ## For contributors
 

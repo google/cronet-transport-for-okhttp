@@ -20,17 +20,19 @@ again.
 
 The project uses [Bazel](https://bazel.build/) and requires:
 
-- Android SDK Platform 32
-- Android NDK 21+
+-   Android SDK Platform 32
+-   Android NDK 21+
 
 For local builds, set ANDROID_HOME and ANDROID_NDK_HOME. For example,
+
 ```
-ANDROID_HOME=$PATH_TO_ANDROID_SDK
-ANDROID_NDK_HOME=$PATH_TO_ANDROID_NDK
+ANDROID_HOME=$PATH_TO_ANDROID_SDK ANDROID_NDK_HOME=$PATH_TO_ANDROID_NDK
 ```
 
-If you run into `sdk/ndk path not set error` while building with the [bazel plugin](https://plugins.jetbrains.com/plugin/9185-bazel-for-android-studio), 
+If you run into `sdk/ndk path not set error` while building with the
+[bazel plugin](https://plugins.jetbrains.com/plugin/9185-bazel-for-android-studio),
 consider setting the `--action_env` bazel flag. For eg:
+
 ```
 --action_env=ANDROID_NDK_HOME=$PATH_TO_ANDROID_SDK
 ```
