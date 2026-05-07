@@ -21,6 +21,6 @@ android {
 dependencies {
   implementation 'com.google.net.cronet:cronet-okhttp:0.1.1'
   implementation 'com.google.android.gms:play-services-cronet:18.1.1'
-  implementation 'com.squareup.okhttp3:okhttp:3.12.13'
+  implementation 'com.squareup.okhttp3:okhttp:4.12.0'
   implementation 'com.google.guava:guava:31.1-android'
 }
