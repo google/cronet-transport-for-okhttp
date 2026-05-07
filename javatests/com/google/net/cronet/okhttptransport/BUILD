@@ -8,21 +8,12 @@ licenses(["notice"])
 android_library(
     name = "cronet_test_helpers",
     testonly = 1,
-    srcs = glob(
-        ["*.java"],
-        exclude = [
-            "*Test.java",
-            "CronetEngineTestAppRule.java",
-        ],
-    ),
+    srcs = [
+        "TestUtils.java",
+    ],
     deps = [
-        "@maven//:androidx_annotation_annotation",
-        "@maven//:androidx_test_core",
-        "@maven//:androidx_test_ext_junit",
-        "@maven//:com_google_guava_guava",  # ,:concurrent,
         "@maven//:com_google_truth_truth",
         "@maven//:com_squareup_okio_okio",
-        "@maven//:org_chromium_net_cronet_api",
     ],
 )
 
@@ -35,7 +26,6 @@ android_local_test(
     deps = [
         ":cronet_test_helpers",
         "//:okhttp_cronet_transport",
-        "@maven//:androidx_annotation_annotation",
         "@maven//:androidx_test_ext_junit",
         "@maven//:com_google_guava_guava",  # :base,:concurrent,
         "@maven//:com_google_truth_truth",
