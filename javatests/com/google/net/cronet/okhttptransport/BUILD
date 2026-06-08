@@ -23,6 +23,10 @@ android_local_test(
         "RequestBodyConverterTest.java",
     ],
     manifest = "LocalTestManifest.xml",
+    manifest_values = {
+        "minSdkVersion": "23",
+        "targetSdkVersion": "36",
+    },
     deps = [
         ":cronet_test_helpers",
         "//:okhttp_cronet_transport",
@@ -43,6 +47,10 @@ android_local_test(
         "ResponseConverterTest.java",
     ],
     manifest = "LocalTestManifest.xml",
+    manifest_values = {
+        "minSdkVersion": "23",
+        "targetSdkVersion": "36",
+    },
     deps = [
         "//:okhttp_cronet_transport",
         "@maven//:androidx_test_ext_junit",
@@ -81,6 +89,10 @@ android_binary(
     testonly = 1,
     instruments = "//java/com/google/net/cronet/testing/testapp:embedded_cronet_test_app",
     manifest = "InstrumentationTestManifest.xml",
+    manifest_values = {
+        "minSdkVersion": "23",
+        "targetSdkVersion": "36",
+    },
     deps = [":cronet_interceptor_test_lib"],
 )
 
@@ -125,6 +137,10 @@ android_binary(
     testonly = 1,
     instruments = "//java/com/google/net/cronet/testing/testapp:embedded_cronet_test_app",
     manifest = "InstrumentationTestManifest.xml",
+    manifest_values = {
+        "minSdkVersion": "23",
+        "targetSdkVersion": "36",
+    },
     deps = [
         ":call_tests",
     ],

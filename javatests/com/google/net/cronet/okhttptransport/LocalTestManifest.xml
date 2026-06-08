@@ -18,9 +18,6 @@
     package="com.google.net.cronet.okhttptransport"
     android:versionCode="1"
     android:versionName="1.0" >
-  <uses-sdk
-      android:minSdkVersion="23"
-      android:targetSdkVersion="36" />
   <application>
   </application>
 </manifest>

@@ -26,6 +26,10 @@ android_binary(
     name = "embedded_cronet_test_app",
     testonly = 1,
     manifest = "AndroidManifest.xml",
+    manifest_values = {
+        "minSdkVersion": "23",
+        "targetSdkVersion": "36",
+    },
     deps = [
         ":embedded_cronet_test_app_lib",
     ],
