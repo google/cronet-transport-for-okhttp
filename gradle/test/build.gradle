@@ -5,6 +5,44 @@ android {
   testNamespace 'com.google.net.cronet.okhttptransport'
   compileSdk 36
 
+  // It seems that, starting from AGP 9, Kotlin behavior has changed and the
+  // main app now has an implicit dependency on the kotlin stdlib, which it
+  // normally wouldn't have as the code under test does not depend (directly nor
+  // indirectly) on Kotlin. The problem is, the test code also has a dependency
+  // on the kotlin stdlib - a real one, indirectly through androidx.test.
+  // Depending on the kotlin stdlib from both the main app and the test app
+  // causes the Kotlin stdlib classes to be included in the main app only. If
+  // the main app goes through shrinking, the kotlin stdlib classes get removed
+  // as the main app doesn't use them. This in turn causes the test app to
+  // crash as the kotlin stdlib classes are nowhere to be found:
+  //
+  // longMsg: java.lang.ClassNotFoundException: Didn't find class "kotlin.jvm.internal.Lambda" on path: DexPathList[[zip file "/system/framework/android.test.runner.jar", zip file "/system/framework/android.test.mock.jar", zip file "/system/framework/android.test.base.jar", zip file "/data/app/~~2KfRU8_LcMXeWpx4UTy4dQ==/com.google.net.cronet.testing.testapp.test-0Yaib6osIDupFzfpTh6sKQ==/base.apk", zip file "/data/app/~~UfLCKEr0v5wkd5YuQSpd3A==/com.google.net.cronet.testing.testapp-v_exqCht0ixlLELBwcSXtA==/base.apk"],nativeLibraryDirectories=[/data/app/~~2KfRU8_LcMXeWpx4UTy4dQ==/com.google.net.cronet.testing.testapp.test-0Yaib6osIDupFzfpTh6sKQ==/lib/x86_64, /data/app/~~UfLCKEr0v5wkd5YuQSpd3A==/com.google.net.cronet.testing.testapp-v_exqCht0ixlLELBwcSXtA==/lib/x86_64, /system/lib64, /system_ext/lib64]]
+  // timeMillis: 1780670860127
+  // stackTrace:
+  // java.lang.NoClassDefFoundError: Failed resolution of: Lkotlin/jvm/internal/Lambda;
+  // at androidx.test.platform.io.FileTestStorage.<init>(FileTestStorage.java:54)
+  // at androidx.test.platform.io.PlatformTestStorageRegistry$$ExternalSyntheticLambda0.create(R8$$SyntheticClass:0)
+  // at androidx.test.internal.platform.ServiceLoaderWrapper.loadSingleService(ServiceLoaderWrapper.java:76)
+  // at androidx.test.platform.io.PlatformTestStorageRegistry.<clinit>(PlatformTestStorageRegistry.java:35)
+  // at androidx.test.runner.AndroidJUnitRunner.registerTestStorage(AndroidJUnitRunner.java:683)
+  // at androidx.test.runner.AndroidJUnitRunner.onCreate(AndroidJUnitRunner.java:321)
+  // at android.app.ActivityThread.handleBindApplication(ActivityThread.java:8131)
+  // at android.app.ActivityThread.-$$Nest$mhandleBindApplication(Unknown Source:0)
+  // at android.app.ActivityThread$H.handleMessage(ActivityThread.java:2690)
+  // at android.os.Handler.dispatchMessage(Handler.java:132)
+  // at android.os.Looper.dispatchMessage(Looper.java:333)
+  // at android.os.Looper.loopOnce(Looper.java:263)
+  // at android.os.Looper.loop(Looper.java:367)
+  // at android.app.ActivityThread.main(ActivityThread.java:9287)
+  // at java.lang.reflect.Method.invoke(Native Method)
+  // at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:566)
+  // at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:929)
+  //
+  // To work around this, we disable Kotlin support so that kotlin-stdlib
+  // doesn't get pulled into the main app. If we ever want to use Kotlin in the
+  // main app, we will need to find a different solution (e.g. keep rules).
+  enableKotlin = false
+
   defaultConfig {
     minSdk 23
     targetSdk 36
