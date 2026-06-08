@@ -2,11 +2,11 @@ apply plugin: 'com.android.application'
 
 android {
   namespace 'com.google.samples.cronet.okhttptransport'
-  compileSdk 36
+  compileSdk 37
 
   defaultConfig {
     minSdk 23
-    targetSdk 36
+    targetSdk 37
   }
 
   sourceSets {

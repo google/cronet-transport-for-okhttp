@@ -3,7 +3,7 @@ apply plugin: 'com.android.application'
 android {
   namespace 'com.google.net.cronet.testing.testapp'
   testNamespace 'com.google.net.cronet.okhttptransport'
-  compileSdk 36
+  compileSdk 37
 
   // It seems that, starting from AGP 9, Kotlin behavior has changed and the
   // main app now has an implicit dependency on the kotlin stdlib, which it
@@ -45,7 +45,7 @@ android {
 
   defaultConfig {
     minSdk 23
-    targetSdk 36
+    targetSdk 37
   }
 
   sourceSets {
