@@ -9,7 +9,7 @@ android_binary(
     srcs = glob(["*.java"]),
     manifest = "AndroidManifest.xml",
     manifest_values = {
-        "minSdkVersion": "23",
+        "minSdkVersion": "24",
         "targetSdkVersion": "36",
     },
     resource_files = glob(["res/**"]),

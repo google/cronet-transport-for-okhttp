@@ -27,7 +27,7 @@ android_binary(
     testonly = 1,
     manifest = "AndroidManifest.xml",
     manifest_values = {
-        "minSdkVersion": "23",
+        "minSdkVersion": "24",
         "targetSdkVersion": "36",
     },
     deps = [

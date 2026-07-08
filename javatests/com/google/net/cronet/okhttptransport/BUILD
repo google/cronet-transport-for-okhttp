@@ -24,7 +24,7 @@ android_local_test(
     ],
     manifest = "LocalTestManifest.xml",
     manifest_values = {
-        "minSdkVersion": "23",
+        "minSdkVersion": "24",
         "targetSdkVersion": "36",
     },
     deps = [
@@ -48,7 +48,7 @@ android_local_test(
     ],
     manifest = "LocalTestManifest.xml",
     manifest_values = {
-        "minSdkVersion": "23",
+        "minSdkVersion": "24",
         "targetSdkVersion": "36",
     },
     deps = [
@@ -90,7 +90,7 @@ android_binary(
     instruments = "//java/com/google/net/cronet/testing/testapp:embedded_cronet_test_app",
     manifest = "InstrumentationTestManifest.xml",
     manifest_values = {
-        "minSdkVersion": "23",
+        "minSdkVersion": "24",
         "targetSdkVersion": "36",
     },
     deps = [":cronet_interceptor_test_lib"],
@@ -138,7 +138,7 @@ android_binary(
     instruments = "//java/com/google/net/cronet/testing/testapp:embedded_cronet_test_app",
     manifest = "InstrumentationTestManifest.xml",
     manifest_values = {
-        "minSdkVersion": "23",
+        "minSdkVersion": "24",
         "targetSdkVersion": "36",
     },
     deps = [
