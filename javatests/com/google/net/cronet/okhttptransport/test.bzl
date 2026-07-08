@@ -2,7 +2,7 @@ load("//tools/build_defs/android:rules.bzl", "android_instrumentation_test")
 
 TEST_DEVICES = [
     # The oldest API level that we support (min SDK).
-    "google_23_x86_gms_stable",
+    "google_24_x86_gms_stable",
     # Also test on the latest version.
     "google_slim_36_x86_64_gms_stable",
 ]

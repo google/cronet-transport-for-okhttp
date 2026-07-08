@@ -163,14 +163,6 @@ test(
 test(
     name = "LargeReadBenchmarkTest",
     size = "large",
-    additional_devices = [
-        # This test suite requires API 24+, so run it on the oldest supported version.
-        "google_24_x86_gms_stable",
-    ],
-    excluded_devices = [
-        # On API 23 all tests are skipped and the test runner throws with "No tests found to run".
-        "google_23_x86_gms_stable",
-    ],
     test_app = ":call_test_app",
 )
 
