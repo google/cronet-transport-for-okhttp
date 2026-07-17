@@ -183,6 +183,9 @@ limitations and features that are not provided by the bridge:
 ### Call factory incompatibilities
 
 -   `OkHttpClient` configuration is unavailable and bypassed completely.
+-   OkHttp tags on are not supported when using `CronetCallFactory`. `tag`
+    methods called on `Call` instances returned from `CronetCallFactory.newCall`
+    will always throw.
 
 ## For contributors
 
