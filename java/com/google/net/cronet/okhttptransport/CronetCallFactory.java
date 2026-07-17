@@ -30,8 +30,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import kotlin.jvm.functions.Function0;
-import kotlin.reflect.KClass;
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.Request;
@@ -209,26 +207,6 @@ public final class CronetCallFactory implements Call.Factory {
     @Override
     public boolean isCanceled() {
       return canceled.get();
-    }
-
-    @Override
-    public <T> T tag(KClass<T> type) {
-      throw new UnsupportedOperationException("OkHttp tags on CronetCallFactory are not supported");
-    }
-
-    @Override
-    public <T> T tag(Class<? extends T> type) {
-      throw new UnsupportedOperationException("OkHttp tags on CronetCallFactory are not supported");
-    }
-
-    @Override
-    public <T> T tag(KClass<T> type, Function0<? extends T> computeIfAbsent) {
-      throw new UnsupportedOperationException("OkHttp tags on CronetCallFactory are not supported");
-    }
-
-    @Override
-    public <T> T tag(Class<T> type, Function0<? extends T> computeIfAbsent) {
-      throw new UnsupportedOperationException("OkHttp tags on CronetCallFactory are not supported");
     }
 
     @Override

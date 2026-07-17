@@ -33,14 +33,11 @@ load("@rules_jvm_external//:defs.bzl", "maven_install")
 
 maven_install(
     artifacts = [
-        # Kotlin
-        "org.jetbrains.kotlin:kotlin-stdlib:2.2.21",
         # OkHttp
-        "com.squareup.okhttp3:okhttp:5.3.2",
-        "com.squareup.okhttp3:mockwebserver:5.3.2",
-        "com.squareup.okhttp3:okhttp-tls:5.3.2",
-        # Okio
-        "com.squareup.okio:okio:3.16.4",
+        "com.squareup.okhttp3:okhttp:3.12.13",
+        "com.squareup.okhttp3:mockwebserver:3.12.13",
+        "com.squareup.okhttp3:okhttp-tls:3.12.13",
+        "com.squareup.okio:okio:2.10.0",
         # Cronet
         "org.chromium.net:cronet-api:143.7445.0",
         "org.chromium.net:cronet-embedded:143.7445.0",
