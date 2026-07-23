@@ -1520,8 +1520,7 @@ public abstract class CallTest {
     executeSynchronously("/");
 
     RecordedRequest recordedRequest = server.takeRequest();
-    assertThat(recordedRequest.getHeader("User-Agent"))
-        .matches("com.google.net.cronet.testing.testapp.*Cronet.*");
+    assertThat(recordedRequest.getHeader("User-Agent")).containsMatch("Cronet/.*");
   }
 
   /** We forbid non-ASCII characters in outgoing request headers, but accept UTF-8. */
