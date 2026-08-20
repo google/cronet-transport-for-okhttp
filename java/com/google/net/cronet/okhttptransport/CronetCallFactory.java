@@ -140,8 +140,8 @@ public final class CronetCallFactory implements Call.Factory {
     @Override
     public void enqueue(Callback responseCallback) {
       try {
-        timeout.enter();
         evaluateExecutionPreconditions();
+        timeout.enter();
         CronetRequestAndOkHttpResponse requestAndOkHttpResponse =
             converter.convert(
                 request(), motherFactory.readTimeoutMillis, motherFactory.writeTimeoutMillis);
@@ -165,6 +165,11 @@ public final class CronetCallFactory implements Call.Factory {
 
               @Override
               public void onFailure(Throwable t) {
+                // The call has terminally failed and there is no body to read, so stop the call
+                // timeout. Not exiting it here would leave the AsyncTimeout registered with the
+                // watchdog until it fires, retaining this call and firing a spurious cancellation
+                // well after the failure has been reported.
+                call.timeout.exit();
                 if (t instanceof IOException) {
                   responseCallback.onFailure(call, (IOException) t);
                 } else {
