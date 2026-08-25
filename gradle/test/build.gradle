@@ -36,7 +36,7 @@ dependencies {
   // Make sure to pull a higher version of Cronet than play-services-cronet
   // depends on, to work around "Namespace 'org.chromium.net' is used in
   // multiple modules" errors in AGP 9. See https://crbug.com/406926302.
-  implementation 'org.chromium.net:cronet:500.0.2'
+  implementation 'org.chromium.net:cronet-api:143.7445.0'
   androidTestImplementation 'com.google.net.cronet:cronet-okhttp:0.1.1'
   androidTestImplementation 'com.google.truth:truth:1.1.3'
   androidTestImplementation 'androidx.test:core:1.7.0'

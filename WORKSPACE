@@ -42,8 +42,8 @@ maven_install(
         # Okio
         "com.squareup.okio:okio:3.16.4",
         # Cronet
-        "org.chromium.net:cronet:500.0.2",
-        "org.chromium.net:cronet-bundled:500.0.2",
+        "org.chromium.net:cronet-api:143.7445.0",
+        "org.chromium.net:cronet-embedded:143.7445.0",
         # Implementation dependencies
         "com.google.guava:guava:31.1-android",
         "com.google.code.findbugs:jsr305:3.0.2",
