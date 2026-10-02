@@ -36,11 +36,11 @@ maven_install(
         # Kotlin
         "org.jetbrains.kotlin:kotlin-stdlib:2.2.21",
         # OkHttp
-        "com.squareup.okhttp3:okhttp:5.3.2",
-        "com.squareup.okhttp3:mockwebserver:5.3.2",
-        "com.squareup.okhttp3:okhttp-tls:5.3.2",
+        "com.squareup.okhttp3:okhttp:3.12.13",
+        "com.squareup.okhttp3:mockwebserver:3.12.13",
+        "com.squareup.okhttp3:okhttp-tls:3.12.13",
         # Okio
-        "com.squareup.okio:okio:3.16.4",
+        "com.squareup.okio:okio:2.10.0",
         # Cronet
         "org.chromium.net:cronet:500.0.2",
         "org.chromium.net:cronet-bundled:500.0.2",
