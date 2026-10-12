@@ -51,7 +51,7 @@ import org.chromium.net.UrlRequest;
  *   <li>The entirety of OkHttp core is bypassed. This includes caching configuration and network
  *       interceptors.
  *   <li>Some response fields are not being populated due to mismatches between Cronet's and
- *       OkHttp's architecture. TODO(danstahr): add a concrete list).
+ *       OkHttp's architecture.
  * </ol>
  */
 public final class CronetInterceptor implements Interceptor, AutoCloseable {
@@ -66,7 +66,7 @@ public final class CronetInterceptor implements Interceptor, AutoCloseable {
   private CronetInterceptor(RequestResponseConverter converter) {
     this.converter = checkNotNull(converter);
 
-    // TODO(danstahr): There's no other way to know if the call is canceled but polling
+    // TODO: There's no other way to know if the call is canceled but polling
     //  (https://github.com/square/okhttp/issues/7164).
     ScheduledFuture<?> unusedFuture =
         scheduledExecutor.scheduleAtFixedRate(

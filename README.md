@@ -194,3 +194,10 @@ Please see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 This library is licensed under Apache License Version 2.0.
+
+## Security
+
+Eligibility for the
+[Google Open Source Software Vulnerability Rewards Program](https://bughunters.google.com/open-source-security)
+is determined by the
+[Google Open Source Software Vulnerability Reward Program Rules](https://bughunters.google.com/about/rules/open-source/google-open-source-software-vulnerability-reward-program-rules).

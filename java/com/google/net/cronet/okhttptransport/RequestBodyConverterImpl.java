@@ -285,7 +285,7 @@ final class RequestBodyConverterImpl implements RequestBodyConverter {
 
       @Override
       public void rewind(UploadDataSink uploadDataSink) {
-        // TODO(danstahr): OkHttp 4 can use isOneShot flag here and rewind safely.
+        // TODO: OkHttp 4 can use isOneShot flag here and rewind safely.
         uploadDataSink.onRewindError(new UnsupportedOperationException("Rewind is not supported!"));
       }
     }
@@ -353,7 +353,7 @@ final class RequestBodyConverterImpl implements RequestBodyConverter {
 
         @Override
         public void rewind(UploadDataSink uploadDataSink) {
-          // TODO(danstahr): OkHttp 4 can use isOneShot flag here and rewind safely.
+          // TODO: OkHttp 4 can use isOneShot flag here and rewind safely.
           uploadDataSink.onRewindError(new UnsupportedOperationException());
         }
       };

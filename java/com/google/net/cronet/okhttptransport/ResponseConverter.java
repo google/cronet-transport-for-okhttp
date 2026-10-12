@@ -203,7 +203,7 @@ final class ResponseConverter {
       try {
         contentLength = contentLengthString != null ? Long.parseLong(contentLengthString) : -1;
       } catch (NumberFormatException e) {
-        // TODO(danstahr): add logging
+        // TODO: add logging
         contentLength = -1;
       }
     }
@@ -227,7 +227,7 @@ final class ResponseConverter {
     if (negotiatedProtocol.contains("quic")) {
       return Protocol.QUIC;
     } else if (negotiatedProtocol.contains("h3")) {
-      // TODO(danstahr): Should be h3 for newer OkHttp
+      // TODO: Should be h3 for newer OkHttp
       return Protocol.QUIC;
     } else if (negotiatedProtocol.contains("spdy")) {
       return Protocol.HTTP_2;

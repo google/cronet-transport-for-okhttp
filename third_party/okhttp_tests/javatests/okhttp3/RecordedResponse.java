@@ -148,7 +148,7 @@ public final class RecordedResponse {
   }
 
   public RecordedResponse assertSentRequestAtMillis(long minimum, long maximum) {
-    // TODO(danstahr): These are not set yet in Cronet interceptor / bridge
+    // TODO: These are not set yet in Cronet interceptor / bridge
     if (ENABLE_REQUEST_AND_RESPONSE_TIMESTAMP_ASSERTS) {
       assertDateInRange(minimum, response.sentRequestAtMillis(), maximum);
     }
@@ -156,7 +156,7 @@ public final class RecordedResponse {
   }
 
   public RecordedResponse assertReceivedResponseAtMillis(long minimum, long maximum) {
-    // TODO(danstahr): These are not set yet in Cronet interceptor / bridge
+    // TODO: These are not set yet in Cronet interceptor / bridge
     if (ENABLE_REQUEST_AND_RESPONSE_TIMESTAMP_ASSERTS) {
       assertDateInRange(minimum, response.receivedResponseAtMillis(), maximum);
     }

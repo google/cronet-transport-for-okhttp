@@ -50,7 +50,7 @@ public class CronetCallFactoryCallTest extends CallTest {
   }
 
   @Test
-  // TODO(danstahr): implement for interceptor approach as well
+  // TODO: implement for interceptor approach as well
   public void setFollowRedirectsFalse() throws Exception {
     server.enqueue(new MockResponse().setResponseCode(302).addHeader("Location: /b").setBody("A"));
     server.enqueue(new MockResponse().setBody("B"));

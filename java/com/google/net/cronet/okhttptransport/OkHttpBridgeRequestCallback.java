@@ -360,7 +360,7 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
 
     @Override
     public Timeout timeout() {
-      // TODO(danstahr): This should likely respect the OkHttp timeout somehow
+      // TODO: This should likely respect the OkHttp timeout somehow
       return Timeout.NONE;
     }
 

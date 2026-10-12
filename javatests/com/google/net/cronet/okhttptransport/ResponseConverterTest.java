@@ -52,7 +52,7 @@ public class ResponseConverterTest {
   private static final MediaType GOOGLE_COM_MEDIA_TYPE =
       MediaType.parse("text/html; charset=UTF-8");
 
-  // TODO(danstahr): Separate the getters to an interface and make OkHttpBridgeRequestCallback final
+  // TODO: Separate the getters to an interface and make OkHttpBridgeRequestCallback final
   private OkHttpBridgeRequestCallback mockRequestCallback;
 
   private final ResponseConverter underTest = new ResponseConverter();
