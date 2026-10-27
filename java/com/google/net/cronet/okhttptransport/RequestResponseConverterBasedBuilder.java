@@ -80,7 +80,7 @@ abstract class RequestResponseConverterBasedBuilder<
             Executors.newFixedThreadPool(uploadDataProviderExecutorSize),
             // There must always be enough executors to blocking-read the OkHttp request bodies
             // otherwise deadlocks can occur.
-            RequestBodyConverterImpl.create(Executors.newCachedThreadPool()),
+            Executors.newCachedThreadPool(),
             new ResponseConverter(),
             redirectStrategy);
 

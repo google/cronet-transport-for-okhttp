@@ -21,6 +21,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import java.io.IOException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -37,19 +38,19 @@ final class RequestResponseConverter {
 
   private final CronetEngine cronetEngine;
   private final Executor uploadDataProviderExecutor;
+  private final ExecutorService requestBodyReaderExecutor;
   private final ResponseConverter responseConverter;
-  private final RequestBodyConverter requestBodyConverter;
   private final RedirectStrategy redirectStrategy;
 
   RequestResponseConverter(
       CronetEngine cronetEngine,
       Executor uploadDataProviderExecutor,
-      RequestBodyConverter requestBodyConverter,
+      ExecutorService requestBodyReaderExecutor,
       ResponseConverter responseConverter,
       RedirectStrategy redirectStrategy) {
     this.cronetEngine = cronetEngine;
     this.uploadDataProviderExecutor = uploadDataProviderExecutor;
-    this.requestBodyConverter = requestBodyConverter;
+    this.requestBodyReaderExecutor = requestBodyReaderExecutor;
     this.responseConverter = responseConverter;
     this.redirectStrategy = redirectStrategy;
   }
@@ -121,7 +122,7 @@ final class RequestResponseConverter {
         }
 
         builder.setUploadDataProvider(
-            requestBodyConverter.convertRequestBody(body, writeTimeoutMillis),
+            new RequestBodyConverter(body, requestBodyReaderExecutor, writeTimeoutMillis),
             uploadDataProviderExecutor);
       }
     }
