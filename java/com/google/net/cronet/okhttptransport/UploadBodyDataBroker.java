@@ -136,7 +136,9 @@ final class UploadBodyDataBroker implements Sink {
       return pendingRead.take();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      throw new IOException("Interrupted while waiting for a read to finish!");
+      throw new IOException(
+          "Interrupted while uploading request body - this may be due to the request body being"
+              + " rewinded");
     }
   }
 

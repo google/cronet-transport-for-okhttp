@@ -212,6 +212,88 @@ public class RequestBodyConverterTest {
     assertThat(readAll(provider)).isEqualTo(content);
   }
 
+  @Test
+  public void testStreaming_knownLength_rewindAfterFullRead() throws Exception {
+    RequestBodyConverter converter =
+        new StreamingRequestBodyConverter(Executors.newSingleThreadExecutor());
+
+    byte[] content = TestUtils.generateRandomBytesArray(KB_56);
+    RequestBody requestBody = new TestRequestBody(content);
+    UploadDataProvider provider = converter.convertRequestBody(requestBody, NO_TIMEOUT);
+
+    assertThat(readAll(provider)).isEqualTo(content);
+    rewind(provider);
+    assertThat(readAll(provider)).isEqualTo(content);
+  }
+
+  @Test
+  public void testStreaming_unknownLength_rewindAfterFullRead() throws Exception {
+    RequestBodyConverter converter =
+        new StreamingRequestBodyConverter(Executors.newSingleThreadExecutor());
+
+    byte[] content = TestUtils.generateRandomBytesArray(KB_56);
+    RequestBody requestBody = new TestRequestBody(content, -1);
+    UploadDataProvider provider = converter.convertRequestBody(requestBody, NO_TIMEOUT);
+
+    assertThat(readAll(provider)).isEqualTo(content);
+    rewind(provider);
+    assertThat(readAll(provider)).isEqualTo(content);
+  }
+
+  @Test
+  public void testStreaming_knownLength_rewindAfterPartialRead() throws Exception {
+    RequestBodyConverter converter =
+        new StreamingRequestBodyConverter(Executors.newSingleThreadExecutor());
+
+    byte[] content = TestUtils.generateRandomBytesArray(KB_56);
+    RequestBody requestBody = new TestRequestBody(content);
+    UploadDataProvider provider = converter.convertRequestBody(requestBody, NO_TIMEOUT);
+
+    TestUploadDataSink sink = new TestUploadDataSink();
+    provider.read(sink, ByteBuffer.allocateDirect(8 * 1024));
+    assertThat(sink.waitForCallback()).isFalse();
+
+    rewind(provider);
+    assertThat(readAll(provider)).isEqualTo(content);
+  }
+
+  @Test
+  public void testStreaming_unknownLength_rewindAfterPartialRead() throws Exception {
+    RequestBodyConverter converter =
+        new StreamingRequestBodyConverter(Executors.newSingleThreadExecutor());
+
+    byte[] content = TestUtils.generateRandomBytesArray(KB_56);
+    RequestBody requestBody = new TestRequestBody(content, -1);
+    UploadDataProvider provider = converter.convertRequestBody(requestBody, NO_TIMEOUT);
+
+    TestUploadDataSink sink = new TestUploadDataSink();
+    provider.read(sink, ByteBuffer.allocateDirect(8 * 1024));
+    assertThat(sink.waitForCallback()).isFalse();
+
+    rewind(provider);
+    assertThat(readAll(provider)).isEqualTo(content);
+  }
+
+  @Test
+  public void testStreaming_oneShot_rewindFails() throws Exception {
+    RequestBodyConverter converter =
+        new StreamingRequestBodyConverter(Executors.newSingleThreadExecutor());
+
+    byte[] content = TestUtils.generateRandomBytesArray(KB_56);
+    RequestBody requestBody = new TestRequestBody(content, content.length, false, true);
+    UploadDataProvider provider = converter.convertRequestBody(requestBody, NO_TIMEOUT);
+
+    assertThat(readAll(provider)).isEqualTo(content);
+    ExecutionException exception = assertThrows(ExecutionException.class, () -> rewind(provider));
+    assertThat(exception).hasCauseThat().isInstanceOf(UnsupportedOperationException.class);
+  }
+
+  private static void rewind(UploadDataProvider uploadDataProvider) throws Exception {
+    TestUploadDataSink sink = new TestUploadDataSink();
+    uploadDataProvider.rewind(sink);
+    sink.waitForRewindCallback();
+  }
+
   /**
    * Reads the entire body from the given {@link UploadDataProvider} and returns it as a byte array.
    */
@@ -248,19 +330,26 @@ public class RequestBodyConverterTest {
     private final byte[] content;
     private final long contentLength;
     private final boolean closeSinkAfterWrite;
+    private final boolean isOneShot;
 
     TestRequestBody(byte[] content) {
-      this(content, content.length, false);
+      this(content, content.length, false, false);
     }
 
     TestRequestBody(byte[] content, long contentLength) {
-      this(content, contentLength, false);
+      this(content, contentLength, false, false);
     }
 
     TestRequestBody(byte[] content, long contentLength, boolean closeSinkAfterWrite) {
+      this(content, contentLength, closeSinkAfterWrite, false);
+    }
+
+    TestRequestBody(
+        byte[] content, long contentLength, boolean closeSinkAfterWrite, boolean isOneShot) {
       this.content = content;
       this.contentLength = contentLength;
       this.closeSinkAfterWrite = closeSinkAfterWrite;
+      this.isOneShot = isOneShot;
     }
 
     @Override
@@ -271,6 +360,11 @@ public class RequestBodyConverterTest {
     @Override
     public long contentLength() throws IOException {
       return contentLength;
+    }
+
+    @Override
+    public boolean isOneShot() {
+      return isOneShot;
     }
 
     @Override
@@ -285,15 +379,18 @@ public class RequestBodyConverterTest {
   private static final class TestUploadDataSink extends UploadDataSink {
 
     private final SettableFuture<Boolean> result = SettableFuture.create();
+    private final SettableFuture<Void> rewindResult = SettableFuture.create();
 
     @Override
     public void onReadSucceeded(boolean finalChunk) {
       result.set(finalChunk);
+      rewindResult.setException(new AssertionError("Unexpected onReadSucceeded"));
     }
 
     @Override
     public void onReadError(Exception exception) {
       result.setException(exception);
+      rewindResult.setException(new AssertionError("Unexpected onReadError", exception));
     }
 
     /**
@@ -306,12 +403,18 @@ public class RequestBodyConverterTest {
 
     @Override
     public void onRewindSucceeded() {
-      throw new UnsupportedOperationException();
+      rewindResult.set(null);
+      result.setException(new AssertionError("Unexpected onRewindSucceeded"));
     }
 
     @Override
     public void onRewindError(Exception exception) {
-      throw new UnsupportedOperationException();
+      rewindResult.setException(exception);
+      result.setException(new AssertionError("Unexpected onRewindError", exception));
+    }
+
+    private void waitForRewindCallback() throws ExecutionException {
+      Uninterruptibles.getUninterruptibly(rewindResult);
     }
   }
 }

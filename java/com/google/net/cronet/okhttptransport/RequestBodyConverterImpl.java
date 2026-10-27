@@ -103,7 +103,7 @@ final class RequestBodyConverterImpl implements RequestBodyConverter {
 
     private static class StreamingUploadDataProvider extends UploadDataProvider {
       private final RequestBody okHttpRequestBody;
-      private final UploadBodyDataBroker broker;
+      private UploadBodyDataBroker broker;
       private final ListeningExecutorService readTaskExecutor;
       private final long writeTimeoutMillis;
 
@@ -231,11 +231,12 @@ final class RequestBodyConverterImpl implements RequestBodyConverter {
       private void ensureReadTaskStarted() {
         // We don't expect concurrent calls so a simple flag is sufficient
         if (readTaskFuture == null) {
+          final UploadBodyDataBroker currentBroker = broker;
           readTaskFuture =
               readTaskExecutor.submit(
                   (Callable<Void>)
                       () -> {
-                        BufferedSink bufferedSink = Okio.buffer(broker);
+                        BufferedSink bufferedSink = Okio.buffer(currentBroker);
                         okHttpRequestBody.writeTo(bufferedSink);
                         // The user (RequestBody#writeTo) is done writing the request body.
                         // At this point, the user might or might not have closed the sink.
@@ -259,7 +260,7 @@ final class RequestBodyConverterImpl implements RequestBodyConverter {
 
                 @Override
                 public void onFailure(Throwable t) {
-                  broker.setBackgroundReadError(t);
+                  currentBroker.setBackgroundReadError(t);
                 }
               },
               MoreExecutors.directExecutor());
@@ -285,8 +286,33 @@ final class RequestBodyConverterImpl implements RequestBodyConverter {
 
       @Override
       public void rewind(UploadDataSink uploadDataSink) {
-        // TODO: OkHttp 4 can use isOneShot flag here and rewind safely.
-        uploadDataSink.onRewindError(new UnsupportedOperationException("Rewind is not supported!"));
+        if (okHttpRequestBody.isOneShot()) {
+          uploadDataSink.onRewindError(new UnsupportedOperationException("Body is one-shot"));
+          return;
+        }
+
+        // Interrupt the okHttpRequestBody.writeTo() call, if any. This hopefully compels the user's
+        // RequestBody.writeTo() implementation to stop producing data that's going nowhere.
+        //
+        // Note: there may be subtle differences in behaviour with OkHttp here. If the thread gets
+        // interrupted in UploadBodyDataBroker.write() while waiting for the next read() call from
+        // Cronet (getPendingCronetRead()) then write() will throw, which is similar to what
+        // OkHttp would do (although the exception type may differ). On the other hand, if the
+        // thread is interrupted while UploadBodyDataBroker is waiting for the next write() call,
+        // then it's the user code (okHttpRequestBody.writeTo()) that gets interrupted, which is
+        // something that would not happen in standard OkHttp. This approach is a bit more efficient
+        // because it stops user code from producing a pointless chunk that's going nowhere, at the
+        // cost of a small deviation from standard OkHttp behavior.
+        if (readTaskFuture != null) {
+          readTaskFuture.cancel(true);
+          readTaskFuture = null;
+        }
+        totalBytesReadFromOkHttp = 0;
+        // Swap out the broker so that any ongoing writes or errors (especially interruption errors)
+        // are thrown away and do not affect the post-rewind state.
+        broker = new UploadBodyDataBroker();
+
+        uploadDataSink.onRewindSucceeded();
       }
     }
   }
