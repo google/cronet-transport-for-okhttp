@@ -16,11 +16,20 @@
 
 package com.google.net.cronet.okhttptransport;
 
+import static com.google.common.truth.Truth.assertThat;
+import static java.util.concurrent.TimeUnit.SECONDS;
+
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import com.google.net.cronet.testing.CronetEngineTestAppRule;
+import java.io.IOException;
+import java.util.concurrent.CountDownLatch;
 import okhttp3.Call;
 import okhttp3.CallTest;
+import okhttp3.Callback;
+import okhttp3.Request;
+import okhttp3.Response;
 import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.SocketPolicy;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -64,5 +73,40 @@ public class CronetCallFactoryCallTest extends CallTest {
         // Cronet doesn't allow reading the body of a redirect response
         .assertBody("")
         .assertCode(302);
+  }
+
+  @Test
+  public void enqueueFailureStopsCallTimeout() throws Exception {
+    // The connection is reset by the server immediately after being accepted, causing the request
+    // to fail asynchronously well before the call timeout elapses.
+    server.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START));
+
+    underTest =
+        CronetCallFactory.newBuilder(engineRule.getEngine()).setCallTimeoutMillis(5_000).build();
+
+    Request request = new Request.Builder().url(server.url("/")).build();
+    Call call = underTest.newCall(request);
+
+    CountDownLatch failureLatch = new CountDownLatch(1);
+    call.enqueue(
+        new Callback() {
+          @Override
+          public void onFailure(Call call, IOException e) {
+            failureLatch.countDown();
+          }
+
+          @Override
+          public void onResponse(Call call, Response response) {
+            throw new AssertionError("The request shouldn't have succeeded!");
+          }
+        });
+
+    assertThat(failureLatch.await(30, SECONDS)).isTrue();
+    assertThat(call.isCanceled()).isFalse();
+
+    // The call has already failed, so its timeout must have been stopped. Wait for longer than the
+    // call timeout to give a leaked AsyncTimeout a chance to fire and spuriously cancel the call.
+    Thread.sleep(6_000);
+    assertThat(call.isCanceled()).isFalse();
   }
 }
