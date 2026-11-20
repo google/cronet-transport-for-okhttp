@@ -1795,10 +1795,7 @@ public abstract class CallTest {
                 })
             .build();
 
-    RecordedResponse recordedResponse = executeSynchronously(request);
-    assertThat(recordedResponse.failure).isNotNull();
-    assertThat(Throwables.getRootCause(recordedResponse.failure))
-        .isInstanceOf(OutOfMemoryError.class);
+    assertThrows(OutOfMemoryError.class, () -> underTest.newCall(request).execute());
   }
 
   void upload(final boolean chunked, final int size, final int writeSize) throws Exception {

@@ -19,7 +19,6 @@ package com.google.net.cronet.okhttptransport;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 
-import java.util.concurrent.Executors;
 import org.chromium.net.CronetEngine;
 
 abstract class RequestResponseConverterBasedBuilder<
@@ -70,13 +69,7 @@ abstract class RequestResponseConverterBasedBuilder<
     }
 
     RequestResponseConverter converter =
-        new RequestResponseConverter(
-            cronetEngine,
-            // There must always be enough executors to blocking-read the OkHttp request bodies
-            // otherwise deadlocks can occur.
-            Executors.newCachedThreadPool(),
-            new ResponseConverter(),
-            redirectStrategy);
+        new RequestResponseConverter(cronetEngine, new ResponseConverter(), redirectStrategy);
 
     return build(converter);
   }

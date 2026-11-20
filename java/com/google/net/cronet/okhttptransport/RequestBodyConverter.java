@@ -17,69 +17,57 @@
 package com.google.net.cronet.okhttptransport;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkState;
+import static java.lang.Math.min;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
-import com.google.common.base.Verify;
-import com.google.common.util.concurrent.FutureCallback;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.ListeningExecutorService;
-import com.google.common.util.concurrent.MoreExecutors;
-import com.google.net.cronet.okhttptransport.UploadBodyDataBroker.ReadResult;
+import com.google.net.cronet.okhttptransport.OkHttpBridgeRequestCallback.Event;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
-import java.util.function.Consumer;
+import java.util.concurrent.BlockingQueue;
 import javax.annotation.Nullable;
 import okhttp3.RequestBody;
+import okio.Buffer;
 import okio.BufferedSink;
 import okio.Okio;
+import okio.Sink;
+import okio.Timeout;
 import org.chromium.net.UploadDataProvider;
 import org.chromium.net.UploadDataSink;
 
 /**
- * An {@link UploadDataProvider} that bridges OkHttp's {@link RequestBody} to Cronet without holding
- * the entire request body in memory.
+ * An {@link UploadDataProvider} that streams OkHttp's {@link RequestBody} on the calling (user)
+ * thread without holding the entire body in memory or spawning a background thread:
  *
  * <ol>
- *   <li>{@link RequestBody#writeTo(BufferedSink)} is invoked on the body in a background task,
- *       where the sink blocks until Cronet requests data.
- *   <li>A non-blocking call to {@link UploadDataProvider#read(UploadDataSink, ByteBuffer)} enqueues
- *       Cronet's buffer, unblocking the background sink to copy a chunk of the body into the buffer
- *       and invoke {@link UploadDataSink#onReadSucceeded(boolean)}, before blocking again until the
- *       next read.
+ *   <li>{@link #getLength}, {@link #read}, and {@link #rewind} hold no mutable state and only
+ *       enqueue events onto {@code events}.
+ *   <li>{@link #handleUploadEvent} executes exclusively on the user thread, confining all upload
+ *       state and {@link UploadDataSink} completions to a single thread with zero locks.
+ *   <li>Upload failures throw directly out of {@link #handleUploadEvent} so {@code
+ *       waitForResponseHeaders} immediately cancels the {@code UrlRequest}, while non-read {@link
+ *       Event}s (such as early HTTP responses) abort {@link #writeBody} and return the {@link
+ *       Event} without cancelling {@code UrlRequest}.
  * </ol>
- *
- * This is repeated until the entire body has been read.
  */
 final class RequestBodyConverter extends UploadDataProvider {
   private final RequestBody okHttpRequestBody;
   private final long contentLength;
-  private volatile UploadBodyDataBroker broker = new UploadBodyDataBroker();
-  private final ListeningExecutorService readTaskExecutor;
-  private final int writeTimeoutMillis;
+  private final long writeTimeoutMillis;
+  private final BlockingQueue<Event> events;
 
-  /** The future for the task that reads the OkHttp request body in the background. */
-  private volatile ListenableFuture<?> readTaskFuture;
-
-  /** The number of bytes we read from the OkHttp body thus far. */
-  private volatile long totalBytesReadFromOkHttp;
+  @Nullable private Event.Upload activeUploadEvent = null;
 
   RequestBodyConverter(
       RequestBody okHttpRequestBody,
       long contentLength,
-      ExecutorService readTaskExecutor,
-      int writeTimeoutMillis) {
+      long writeTimeoutMillis,
+      BlockingQueue<Event> events) {
     checkArgument(writeTimeoutMillis >= 0);
     this.okHttpRequestBody = okHttpRequestBody;
     this.contentLength = contentLength;
-    if (readTaskExecutor instanceof ListeningExecutorService) {
-      this.readTaskExecutor = (ListeningExecutorService) readTaskExecutor;
-    } else {
-      this.readTaskExecutor = MoreExecutors.listeningDecorator(readTaskExecutor);
-    }
-    this.writeTimeoutMillis = writeTimeoutMillis;
+    this.writeTimeoutMillis = writeTimeoutMillis == 0L ? Long.MAX_VALUE : writeTimeoutMillis;
+    this.events = events;
   }
 
   @Override
@@ -88,232 +76,475 @@ final class RequestBodyConverter extends UploadDataProvider {
   }
 
   @Override
-  public void read(UploadDataSink uploadDataSink, ByteBuffer byteBuffer) throws IOException {
-    ensureReadTaskStarted();
-
-    if (contentLength == -1) {
-      readUnknownBodyLength(uploadDataSink, byteBuffer);
-    } else {
-      readKnownBodyLength(uploadDataSink, byteBuffer, contentLength);
-    }
-  }
-
-  private void readKnownBodyLength(
-      UploadDataSink uploadDataSink, ByteBuffer byteBuffer, long expectedLength) {
-    Future<?> currentReadTask = readTaskFuture;
-    readFromOkHttp(
-        uploadDataSink,
-        byteBuffer,
-        readResult -> {
-          if (totalBytesReadFromOkHttp > expectedLength) {
-            failRead(
-                uploadDataSink,
-                currentReadTask,
-                prepareBodyTooLongException(expectedLength, totalBytesReadFromOkHttp));
-            return;
-          }
-
-          if (totalBytesReadFromOkHttp < expectedLength) {
-            switch (readResult) {
-              case SUCCESS:
-                uploadDataSink.onReadSucceeded(false);
-                break;
-              case END_OF_BODY:
-                failRead(
-                    uploadDataSink,
-                    currentReadTask,
-                    new IOException("The source has been exhausted but we expected more data!"));
-                break;
-            }
-            return;
-          }
-          // Else we're handling what's supposed to be the last chunk
-          handleLastBodyRead(uploadDataSink, byteBuffer, expectedLength);
-        });
-  }
-
-  /**
-   * The last body read is special for fixed length bodies - if Cronet receives exactly the right
-   * amount of data it won't ask for more, even if there is more data in the stream. As a result,
-   * when we read the advertised number of bytes, we need to make sure that the stream is indeed
-   * finished.
-   */
-  private void handleLastBodyRead(
-      UploadDataSink uploadDataSink, ByteBuffer filledByteBuffer, long expectedLength) {
-    // We reuse the same buffer for the END_OF_DATA read (it should be non-destructive and if
-    // it overwrites what's in there we don't mind as that's an error anyway). We just need
-    // to make sure we restore the original position afterwards. We don't use mark() / reset()
-    // as the mark position can be invalidated by limit manipulation.
-    Future<?> currentReadTask = readTaskFuture;
-    int bufferPosition = filledByteBuffer.position();
-    filledByteBuffer.position(0);
-
-    readFromOkHttp(
-        uploadDataSink,
-        filledByteBuffer,
-        readResult -> {
-          if (!readResult.equals(ReadResult.END_OF_BODY)) {
-            failRead(
-                uploadDataSink,
-                currentReadTask,
-                prepareBodyTooLongException(expectedLength, totalBytesReadFromOkHttp));
-            return;
-          }
-
-          Verify.verify(
-              filledByteBuffer.position() == 0,
-              "END_OF_BODY reads shouldn't write anything to the buffer");
-
-          // revert the position change
-          filledByteBuffer.position(bufferPosition);
-
-          uploadDataSink.onReadSucceeded(false);
-        });
-  }
-
-  private void readUnknownBodyLength(UploadDataSink uploadDataSink, ByteBuffer byteBuffer) {
-    readFromOkHttp(
-        uploadDataSink,
-        byteBuffer,
-        readResult -> uploadDataSink.onReadSucceeded(readResult.equals(ReadResult.END_OF_BODY)));
-  }
-
-  /**
-   * Starts a background task to write OkHttp's request body to Cronet.
-   *
-   * <p>Calling this method will start a background task in which OkHttp will start writing the
-   * request body to Cronet.
-   *
-   * <p>This method is idempotent. Calling it more than once has no effect. It is crucial, however,
-   * to ensure it is called at least once - otherwise the request body will never be written to
-   * Cronet.
-   *
-   * <p>This method is not thread-safe and is not expected to be called concurrently.
-   */
-  private void ensureReadTaskStarted() {
-    // We don't expect concurrent calls so a simple flag is sufficient
-    if (readTaskFuture == null) {
-      final UploadBodyDataBroker currentBroker = broker;
-      readTaskFuture =
-          readTaskExecutor.submit(
-              (Callable<Void>)
-                  () -> {
-                    BufferedSink bufferedSink = Okio.buffer(currentBroker);
-                    okHttpRequestBody.writeTo(bufferedSink);
-                    // The user (RequestBody#writeTo) is done writing the request body.
-                    // At this point, the user might or might not have closed the sink.
-                    // Assume the sink might be already closed, so flush() cannot be called.
-
-                    // Close the sink. Upon the first call, close() will flush any
-                    // bytes remaining in the buffer, and will signal Cronet that we're done
-                    // writing the request body. Subsequent calls are no-ops. It is crucial to
-                    // call close() at least once. Otherwise, Cronet will be stuck waiting for
-                    // more data to come, which will never come. This will result in a timeout.
-                    bufferedSink.close();
-
-                    return null;
-                  });
-
-      Futures.addCallback(
-          readTaskFuture,
-          new FutureCallback<Object>() {
-            @Override
-            public void onSuccess(Object result) {}
-
-            @Override
-            public void onFailure(Throwable t) {
-              currentBroker.setBackgroundReadError(t);
-            }
-          },
-          MoreExecutors.directExecutor());
-    }
-  }
-
-  private void readFromOkHttp(
-      UploadDataSink uploadDataSink, ByteBuffer byteBuffer, Consumer<ReadResult> onSuccess) {
-    UploadBodyDataBroker currentBroker = broker;
-    Future<?> currentReadTask = readTaskFuture;
-    int positionBeforeRead = byteBuffer.position();
-    currentBroker.enqueueBodyRead(
-        byteBuffer,
-        writeTimeoutMillis,
-        new FutureCallback<ReadResult>() {
-          @Override
-          public void onSuccess(@Nullable ReadResult readResult) {
-            if (currentBroker != broker) {
-              return;
-            }
-            int bytesRead = byteBuffer.position() - positionBeforeRead;
-            totalBytesReadFromOkHttp += bytesRead;
-            onSuccess.accept(Verify.verifyNotNull(readResult));
-          }
-
-          @Override
-          public void onFailure(Throwable t) {
-            if (currentBroker != broker) {
-              return;
-            }
-            failRead(uploadDataSink, currentReadTask, t);
-          }
-        });
-  }
-
-  // We deliberately interrupt the background body-reading task on error/timeout so
-  // UploadBodyDataBroker#getPendingCronetRead (which blocks on pendingRead.take()) unblocks
-  // and terminates instead of leaking the executor thread.
-  @SuppressWarnings("Interruption")
-  private static void failRead(
-      UploadDataSink uploadDataSink, @Nullable Future<?> readTask, Throwable cause) {
-    uploadDataSink.onReadError(
-        cause instanceof IOException ? (IOException) cause : new IOException(cause));
-    if (readTask != null) {
-      readTask.cancel(true);
-    }
-  }
-
-  private static IOException prepareBodyTooLongException(
-      long expectedLength, long minActualLength) {
-    return new IOException(
-        "Expected " + expectedLength + " bytes but got at least " + minActualLength);
+  public void read(UploadDataSink uploadDataSink, ByteBuffer byteBuffer) {
+    events.add(new Event.UploadRead(uploadDataSink, byteBuffer));
   }
 
   @Override
   public void rewind(UploadDataSink uploadDataSink) {
-    if (okHttpRequestBody.isOneShot()) {
-      uploadDataSink.onRewindError(new UnsupportedOperationException("Body is one-shot"));
-      return;
-    }
-
-    // Interrupt the okHttpRequestBody.writeTo() call, if any. This hopefully compels the user's
-    // RequestBody.writeTo() implementation to stop producing data that's going nowhere.
-    //
-    // Note: there may be subtle differences in behaviour with OkHttp here. If the thread gets
-    // interrupted in UploadBodyDataBroker.write() while waiting for the next read() call from
-    // Cronet (getPendingCronetRead()) then write() will throw, which is similar to what
-    // OkHttp would do (although the exception type may differ). On the other hand, if the
-    // thread is interrupted while UploadBodyDataBroker is waiting for the next write() call,
-    // then it's the user code (okHttpRequestBody.writeTo()) that gets interrupted, which is
-    // something that would not happen in standard OkHttp. This approach is a bit more efficient
-    // because it stops user code from producing a pointless chunk that's going nowhere, at the
-    // cost of a small deviation from standard OkHttp behavior.
-    if (readTaskFuture != null) {
-      readTaskFuture.cancel(true);
-      readTaskFuture = null;
-    }
-    totalBytesReadFromOkHttp = 0;
-    // Swap out the broker so that any ongoing writes or errors (especially interruption errors)
-    // are thrown away and do not affect the post-rewind state.
-    broker = new UploadBodyDataBroker();
-
-    uploadDataSink.onRewindSucceeded();
+    events.add(new Event.UploadRewind(uploadDataSink));
   }
 
-  @Override
-  @SuppressWarnings("Interruption") // See comment on failRead.
-  public void close() {
-    Future<?> currentReadTask = readTaskFuture;
-    if (currentReadTask != null) {
-      currentReadTask.cancel(true);
+  /**
+   * Handles an {@link Event.Upload} on the calling thread by executing the corresponding {@link
+   * RequestBody} operation ({@link RequestBody#writeTo} for {@link Event.UploadRead}, or {@link
+   * RequestBody#isOneShot} for {@link Event.UploadRewind}) and completing its {@link
+   * UploadDataSink}.
+   *
+   * <p>Unlike {@link #setActiveUploadEvent}, this method actively processes the upload and invokes
+   * user {@link RequestBody} code; it must only be called while the request is proceeding normally
+   * (not while canceling or draining).
+   *
+   * @return {@code null} if the upload event completed normally, or the non-{@link
+   *     Event.UploadRead} {@link Event} that interrupted a read (such as {@link
+   *     Event.ResponseStarted}, {@link Event.RedirectReceived}, {@link Event.UploadRewind}, {@link
+   *     Event.Failed}, or {@link Event.Canceled}) so the caller can process it next.
+   * @throws IOException if a client-side upload failure occurs during {@link Event.UploadRead} —
+   *     specifically, if {@link RequestBody#writeTo} throws an {@link IOException}, writes fewer or
+   *     more bytes than {@link #contentLength}, or waiting for Cronet's next read times out ({@link
+   *     CronetTimeoutException}) — even if {@link RequestBody#writeTo} catches and swallows the
+   *     sink's exception. Any other {@link Throwable} thrown by {@link RequestBody#writeTo}, {@link
+   *     RequestBody#isOneShot}, or the sink also propagates directly (even if swallowed by {@link
+   *     RequestBody#writeTo}).
+   */
+  @Nullable
+  Event handleUploadEvent(Event.Upload event) throws IOException {
+    if (event instanceof Event.UploadRead) {
+      return writeBody((Event.UploadRead) event);
+    } else if (event instanceof Event.UploadRewind) {
+      rewindBody((Event.UploadRewind) event);
+      return null;
+    } else {
+      throw new IllegalStateException("Unexpected upload event: " + event);
+    }
+  }
+
+  /**
+   * Streams {@link #okHttpRequestBody} via {@link RequestBody#writeTo} on the calling thread,
+   * starting with {@code firstRead} and dequeuing subsequent {@link Event.UploadRead} buffers from
+   * {@link #events} until the upload finishes or is interrupted.
+   */
+  @Nullable
+  private Event writeBody(Event.UploadRead firstRead) throws IOException {
+    setActiveUploadEvent(firstRead);
+    RequestBodySink sink = new RequestBodySink();
+    SinkState finalState = null;
+    try {
+      // Note: the code below may result in bufferedSink.close() being called multiple times; this
+      // is benign, RealBufferedSink will safely short-circuit after the first call.
+      try (BufferedSink bufferedSink = Okio.buffer(sink)) {
+        try {
+          okHttpRequestBody.writeTo(bufferedSink);
+          // The user (RequestBody#writeTo) is done writing the request body.
+          // At this point, the user might or might not have closed the sink.
+          // Assume the sink might be already closed, so flush() cannot be called.
+
+          // If the sink is still Open, close it now to flush any bytes remaining in the buffer and
+          // signal Cronet that we're done writing the request body. Otherwise, Cronet will be stuck
+          // waiting for more data to come, which will never come. This will result in a timeout.
+          if (sink.state instanceof SinkState.Open) {
+            bufferedSink.close();
+          }
+        } finally {
+          finalState = sink.state;
+          // BufferedSink.close() may call write() and/or close() on the underlying RequestBodySink.
+          // If the sink is already interrupted this will throw. Avoid this by turning the sink into
+          // a no-op before close() is called.
+          sink.state = SinkState.BlackHole.INSTANCE;
+        }
+      }
+    } catch (InterruptedByCronetException ignored) {
+      // The purpose of InterruptedByCronetException is to tell the user to stop
+      // writing when they call write() or close(). We don't want that exception
+      // to bubble up as the request may not have failed; the user may still be
+      // able to read the response, which may be a redirect or an HTTP error
+      // response.
+      //
+      // We could also make this exception type public and ask the user to
+      // swallow this exception themselves in their writeTo() implementation,
+      // but in practice it's unlikely most users will do that, as this is a
+      // subtle edge case that is specific to okhttp_cronet_transport (standard
+      // OkHttp will attempt to keep going with the upload instead, which is
+      // worse).
+      //
+      // Note if the user has not called close(), we call close() for them (see
+      // above) and swallow any InterruptedByCronetException that may be thrown from
+      // that implicit close() call. This means the user has no way to know that
+      // the upload did not finish. This is probably fine because the server
+      // will almost certainly reply with some kind of error (or redirect)
+      // anyway; it would be very surprising for a server to return an OK
+      // response before the upload finishes. Users can always protect against
+      // this by calling close() themselves instead of letting us do it.
+    }
+
+    if (finalState == SinkState.Closed.INSTANCE) {
+      return null;
+    } else if (finalState instanceof SinkState.InterruptedByCronet) {
+      return ((SinkState.InterruptedByCronet) finalState).event;
+    } else if (finalState instanceof SinkState.InterruptedByClient) {
+      throw ((SinkState.InterruptedByClient) finalState).rethrow();
+    } else {
+      throw new IllegalStateException("Unexpected final sink state: " + finalState);
+    }
+  }
+
+  private void rewindBody(Event.UploadRewind rewind) {
+    setActiveUploadEvent(rewind);
+    boolean isOneShot = okHttpRequestBody.isOneShot();
+    activeUploadEvent = null;
+    if (isOneShot) {
+      rewind.sink.onRewindError(new UnsupportedOperationException("Body is one-shot"));
+    } else {
+      // No need to do anything else here, because this method is only called after writeBody() is
+      // done already (either normally, or through an InterruptedByCronetException caused by the
+      // UploadRewind event). On the next UploadRead event, writeBody() will be called again and
+      // will call RequestBody.writeTo() again, which is how rewinding works in OkHttp.
+      rewind.sink.onRewindSucceeded();
+    }
+  }
+
+  /**
+   * Records an unanswered {@link Event.Upload} without executing any {@link RequestBody} code or
+   * completing its {@link UploadDataSink}, so that {@link #onTerminalEvent} will later fail it with
+   * {@link UploadDataSink#onReadError} or {@link UploadDataSink#onRewindError}.
+   *
+   * <p>Unlike {@link #handleUploadEvent}, this method is intended for cancellation/draining paths
+   * where the request is already terminating and user {@link RequestBody} methods must not be
+   * invoked, while Cronet's contract still requires any outstanding {@link UploadDataSink} to be
+   * answered before resources can be safely freed.
+   */
+  void setActiveUploadEvent(Event.Upload event) {
+    // The API contract of UploadDataProvider guarantees that `read()` and `rewind()` cannot be
+    // called if a previous read or rewind has not been completed yet.
+    checkState(
+        activeUploadEvent == null,
+        "Unexpected concurrent upload event: %s and %s",
+        activeUploadEvent,
+        event);
+    activeUploadEvent = event;
+  }
+
+  /**
+   * Fails any unanswered {@link Event.Upload} once the request has reached a terminal callback
+   * ({@link Event.Succeeded}, {@link Event.Failed}, or {@link Event.Canceled}) so Cronet can clean
+   * up the upload stream.
+   *
+   * <p>One may wonder why we do not simply call {@code onReadError} as soon as the sink enters
+   * {@code InterruptedByCronet}. The reason is because Cronet will (sadly) immediately fail the
+   * entire {@code UrlRequest} as soon as we call {@code onReadError}, which prevents the response
+   * from being read. To work around this limitation, we defer the error call until after we are
+   * completely done with the request, at which point it cannot do any harm.
+   */
+  void onTerminalEvent() {
+    Event.Upload event = activeUploadEvent;
+    if (event == null) {
+      return;
+    }
+    activeUploadEvent = null;
+    if (event instanceof Event.UploadRead) {
+      event.sink.onReadError(new IOException("Request terminated with an active upload read"));
+    } else if (event instanceof Event.UploadRewind) {
+      event.sink.onRewindError(new IOException("Request terminated with an active upload rewind"));
+    } else {
+      throw new IllegalStateException("Unexpected active upload event: " + event);
+    }
+  }
+
+  /**
+   * Lifecycle state of a single {@link #writeBody} attempt.
+   *
+   * <p>State is tracked explicitly on {@link RequestBodySink} rather than inferred from exceptions
+   * escaping {@link RequestBody#writeTo}, because user {@code writeTo} implementations may catch
+   * and swallow exceptions thrown by the sink (or the user may even be calling {@link Sink} methods
+   * from a different thread than the one we called {@link RequestBody#writeTo} on).
+   */
+  private abstract static class SinkState {
+    private SinkState() {}
+
+    /**
+     * Initial state while {@link RequestBody#writeTo} is streaming bytes into Cronet {@link
+     * Event.UploadRead} buffers and the final chunk has not yet been committed.
+     */
+    static final class Open extends SinkState {
+      static final Open INSTANCE = new Open();
+
+      private Open() {}
+    }
+
+    /**
+     * Entered in {@link RequestBodySink#close} once the full request body (matching {@link
+     * #contentLength}, if known) has been written and committed via {@link
+     * UploadDataSink#onReadSucceeded}. {@link #writeBody} returns {@code null} so {@code
+     * waitForResponseHeaders} proceeds to await response headers.
+     */
+    static final class Closed extends SinkState {
+      static final Closed INSTANCE = new Closed();
+
+      private Closed() {}
+    }
+
+    /**
+     * Post-{@link #writeBody} cleanup state where all {@link Sink} operations become no-ops
+     * (discarding any buffered bytes) so the {@link BufferedSink} wrapper can be closed
+     * unconditionally without throwing or transmitting partial data.
+     */
+    static final class BlackHole extends SinkState {
+      static final BlackHole INSTANCE = new BlackHole();
+
+      private BlackHole() {}
+    }
+
+    /**
+     * Cronet interrupted the upload before it finished: entered when {@link
+     * RequestBodySink#obtainActiveRead} dequeues a non-{@link Event.UploadRead} event from {@link
+     * #events} (such as an early server {@link Event.ResponseStarted}, {@link
+     * Event.RedirectReceived}, {@link Event.UploadRewind}, {@link Event.Failed}, or {@link
+     * Event.Canceled}).
+     *
+     * <p>Unlike {@link InterruptedByClient}, no client-side upload error occurred: {@link
+     * RequestBodySink#obtainActiveRead} throws {@link InterruptedByCronetException} only to unwind
+     * {@code writeTo}, and {@link #writeBody} catches {@link InterruptedByCronetException} and
+     * returns {@link #event} to {@code waitForResponseHeaders} <i>without</i> cancelling {@code
+     * UrlRequest} so early HTTP responses, redirects, Rewinds, or Cronet request
+     * failures/cancellations are processed normally by the caller's event loop.
+     */
+    static final class InterruptedByCronet extends SinkState {
+      final Event event;
+
+      InterruptedByCronet(Event event) {
+        this.event = event;
+      }
+    }
+
+    /**
+     * Client-side upload error: entered when a {@link Sink} method throws any {@link Throwable}
+     * (other than {@link InterruptedByCronetException}), writes fewer or more bytes than {@link
+     * #contentLength}, or times out waiting for Cronet's next read ({@link
+     * CronetTimeoutException}).
+     *
+     * <p>Client-side failures are not recoverable: if we report a read error to Cronet, it will
+     * immediately fail the entire request. Therefore, {@link #writeBody} rethrows {@link #cause}
+     * (even if {@code writeTo} swallowed the sink's exception) so {@code waitForResponseHeaders}
+     * immediately cancels {@code UrlRequest} and propagates {@link #cause} to the caller.
+     */
+    static final class InterruptedByClient extends SinkState {
+      @FunctionalInterface
+      interface Rethrower {
+        RuntimeException rethrow() throws IOException;
+      }
+
+      final Throwable cause;
+      private final Rethrower rethrower;
+
+      InterruptedByClient(Throwable cause, Rethrower rethrower) {
+        this.cause = cause;
+        this.rethrower = rethrower;
+      }
+
+      RuntimeException rethrow() throws IOException {
+        throw rethrower.rethrow();
+      }
+    }
+  }
+
+  @FunctionalInterface
+  private interface SinkOperation {
+    void run() throws IOException;
+  }
+
+  private final class RequestBodySink implements Sink {
+    private long totalBytesWritten = 0;
+    SinkState state = SinkState.Open.INSTANCE;
+
+    private void runSinkOperation(SinkOperation operation) throws IOException {
+      SinkState current = state;
+      if (current == SinkState.Open.INSTANCE) {
+        try {
+          operation.run();
+        } catch (InterruptedByCronetException e) {
+          state = new SinkState.InterruptedByCronet(e.event);
+          throw e;
+        } catch (Throwable t) {
+          state =
+              new SinkState.InterruptedByClient(
+                  t,
+                  () -> {
+                    throw t;
+                  });
+          throw t;
+        }
+      } else if (current == SinkState.Closed.INSTANCE) {
+        throw new IllegalStateException("closed");
+      } else if (current == SinkState.BlackHole.INSTANCE) {
+        // No-op.
+      } else if (current instanceof SinkState.InterruptedByCronet) {
+        throw new InterruptedByCronetException(((SinkState.InterruptedByCronet) current).event);
+      } else if (current instanceof SinkState.InterruptedByClient) {
+        throw new IOException(
+            "Upload already failed", ((SinkState.InterruptedByClient) current).cause);
+      } else {
+        throw new IllegalStateException("Unexpected sink state: " + current);
+      }
+    }
+
+    @Override
+    public void write(Buffer source, long byteCount) throws IOException {
+      if (state == SinkState.BlackHole.INSTANCE) {
+        source.skip(byteCount);
+        return;
+      }
+      runSinkOperation(
+          () -> {
+            if (contentLength != -1L && byteCount > contentLength - totalBytesWritten) {
+              throw new IOException(
+                  "Expected "
+                      + contentLength
+                      + " bytes but got at least "
+                      + (totalBytesWritten + byteCount));
+            }
+
+            long bytesRemaining = byteCount;
+            while (bytesRemaining > 0L) {
+              Event.UploadRead read = obtainActiveRead();
+              ByteBuffer buffer = read.buffer;
+              int originalLimit = buffer.limit();
+              int bytesToCopy = (int) min((long) buffer.remaining(), bytesRemaining);
+              buffer.limit(buffer.position() + bytesToCopy);
+              int bytesRead;
+              try {
+                bytesRead = source.read(buffer);
+              } finally {
+                buffer.limit(originalLimit);
+              }
+              checkState(bytesRead > 0, "Source exhausted unexpectedly");
+              bytesRemaining -= bytesRead;
+              totalBytesWritten += bytesRead;
+
+              // For fixed-length bodies, hold the final read uncommitted when totalBytesWritten
+              // reaches contentLength until close() confirms the body has no extra bytes.
+              if (contentLength == -1L || totalBytesWritten < contentLength) {
+                activeUploadEvent = null;
+                read.sink.onReadSucceeded(false);
+              }
+            }
+          });
+    }
+
+    @Override
+    public void flush() throws IOException {
+      runSinkOperation(() -> {});
+    }
+
+    @Override
+    public Timeout timeout() {
+      return Timeout.NONE;
+    }
+
+    @Override
+    public void close() throws IOException {
+      if (state == SinkState.Closed.INSTANCE) {
+        return;
+      }
+      runSinkOperation(
+          () -> {
+            if (contentLength != -1L && totalBytesWritten < contentLength) {
+              throw new IOException("The source has been exhausted but we expected more data!");
+            }
+
+            Event.UploadRead read = obtainActiveRead();
+            activeUploadEvent = null;
+            read.sink.onReadSucceeded(contentLength == -1L);
+            state = SinkState.Closed.INSTANCE;
+          });
+    }
+
+    private Event.UploadRead obtainActiveRead() throws IOException {
+      Event.Upload current = activeUploadEvent;
+      final Event.UploadRead read;
+      if (current == null) {
+        read = pollNextRead();
+      } else if (current instanceof Event.UploadRead) {
+        read = (Event.UploadRead) current;
+      } else {
+        // If a rewind event occurs during the upload phase of the request, we immediately unwind
+        // and process the rewind event; it is not supposed to sit in `activeUploadEvent`.
+        throw new IllegalStateException(
+            "Unexpected active upload event during writeBody: " + current);
+      }
+
+      // Between obtainActiveRead() calls we run user code (i.e. RequestBody.writeTo); therefore,
+      // a potentially unbounded amount of time could have elapsed since we last looked at the event
+      // queue. During this time, it is quite possible that we may have received an UploadRead event
+      // from Cronet, followed by an interruption event. We could just let that interruption
+      // event sit in the queue until the next call to obtainActiveRead(), but if we do that we may
+      // end up letting the user do pointless work on an upload that is actually aborted. So, as an
+      // optimization, we check for this case now so that we can report the interruption sooner.
+      // This also ensures that, if the interruption is received between the last chunk and close(),
+      // close() will correctly report the interruption instead of pretending the upload succeeded.
+      Event queued = events.poll();
+      if (queued != null) {
+        throw new InterruptedByCronetException(queued);
+      }
+      return read;
+    }
+
+    private Event.UploadRead pollNextRead() throws IOException {
+      Event event;
+      try {
+        event = events.poll(writeTimeoutMillis, MILLISECONDS);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        event = null;
+      }
+      if (event == null) {
+        throw new CronetTimeoutException();
+      }
+      // We expect to only receive UploadRead events until we have uploaded the entire request body.
+      // If we get anything else, it can mean something went wrong, or the server started responding
+      // before the upload finished. Note in the latter case, standard OkHttp behavior is to keep
+      // uploading anyway, even though the server likely stopped listening. This is arguably a flaw
+      // in OkHttp, as it can lead to confusing outcomes (e.g. deadlock while trying to upload as
+      // the server is not consuming bytes anymore). Here we diverge from OkHttp behavior and throw
+      // an "aborted" exception which is clearer and also allows the user to potentially read the
+      // response. We may want to revisit this if this difference in behavior causes breakage for
+      // users.
+      if (!(event instanceof Event.UploadRead)) {
+        throw new InterruptedByCronetException(event);
+      }
+      Event.UploadRead uploadRead = (Event.UploadRead) event;
+      setActiveUploadEvent(uploadRead);
+      return uploadRead;
+    }
+  }
+
+  private static final class InterruptedByCronetException extends IOException {
+    final Event event;
+
+    InterruptedByCronetException(Event event) {
+      super(
+          formatMessage(event),
+          event instanceof Event.Failed ? ((Event.Failed) event).exception : null);
+      this.event = event;
+    }
+
+    private static String formatMessage(Event event) {
+      if (event instanceof Event.ResponseStarted) {
+        return "Upload aborted because response started (HTTP "
+            + ((Event.ResponseStarted) event).info.getHttpStatusCode()
+            + ")";
+      } else if (event instanceof Event.RedirectReceived) {
+        return "Upload aborted because redirect received (HTTP "
+            + ((Event.RedirectReceived) event).info.getHttpStatusCode()
+            + ")";
+      } else if (event instanceof Event.UploadRewind) {
+        return "Upload aborted because upload rewind was requested";
+      } else if (event instanceof Event.Failed) {
+        return "Upload aborted because request failed";
+      } else if (event instanceof Event.Canceled) {
+        return "Upload aborted because request was canceled";
+      } else {
+        throw new IllegalStateException("Unexpected event during upload: " + event);
+      }
     }
   }
 }

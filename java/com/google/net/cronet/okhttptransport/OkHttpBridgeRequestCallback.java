@@ -17,6 +17,7 @@
 package com.google.net.cronet.okhttptransport;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
@@ -29,11 +30,15 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.TimeUnit;
+import javax.annotation.Nullable;
+import okhttp3.RequestBody;
 import okio.Buffer;
 import okio.Source;
 import okio.Timeout;
 import org.chromium.net.CronetException;
+import org.chromium.net.UploadDataProvider;
+import org.chromium.net.UploadDataSink;
 import org.chromium.net.UrlRequest;
 import org.chromium.net.UrlResponseInfo;
 
@@ -55,6 +60,40 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
   /** Events posted from Cronet callbacks to the user thread. */
   abstract static class Event {
     private Event() {}
+
+    /**
+     * Terminal {@link UrlRequest.Callback} events after which Cronet emits no further callbacks.
+     */
+    abstract static class Terminal extends Event {
+      private Terminal() {}
+    }
+
+    /**
+     * {@link UploadDataProvider} callbacks that require a matching completion call on {@link
+     * #sink}.
+     */
+    abstract static class Upload extends Event {
+      final UploadDataSink sink;
+
+      private Upload(UploadDataSink sink) {
+        this.sink = sink;
+      }
+    }
+
+    static final class UploadRead extends Upload {
+      final ByteBuffer buffer;
+
+      UploadRead(UploadDataSink sink, ByteBuffer buffer) {
+        super(sink);
+        this.buffer = buffer;
+      }
+    }
+
+    static final class UploadRewind extends Upload {
+      UploadRewind(UploadDataSink sink) {
+        super(sink);
+      }
+    }
 
     static final class ResponseStarted extends Event {
       final UrlResponseInfo info;
@@ -78,21 +117,21 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
       private ReadCompleted() {}
     }
 
-    static final class Succeeded extends Event {
+    static final class Succeeded extends Terminal {
       static final Succeeded INSTANCE = new Succeeded();
 
       private Succeeded() {}
     }
 
-    static final class Failed extends Event {
-      final IOException exception;
+    static final class Failed extends Terminal {
+      final CronetException exception;
 
-      Failed(IOException exception) {
+      Failed(CronetException exception) {
         this.exception = exception;
       }
     }
 
-    static final class Canceled extends Event {
+    static final class Canceled extends Terminal {
       static final Canceled INSTANCE = new Canceled();
 
       private Canceled() {}
@@ -117,16 +156,56 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
   private static final int CRONET_BYTE_BUFFER_CAPACITY = 32 * 1024;
 
   /** Signal whether the request is finished and the response has been fully read. */
-  private final AtomicBoolean finished = new AtomicBoolean(false);
+  private boolean finished = false;
 
   /** Signal whether the request was canceled. */
-  private final AtomicBoolean canceled = new AtomicBoolean(false);
+  private boolean canceled = false;
 
   /**
    * An internal, blocking, thread-safe queue passing events between Cronet callbacks and the user
    * thread.
    */
-  private final BlockingQueue<Event> events = new LinkedBlockingQueue<>();
+  private final BlockingQueue<Event> events =
+      new LinkedBlockingQueue<Event>() {
+        @Override
+        public Event take() throws InterruptedException {
+          Event event = super.take();
+          onEventDequeued(event);
+          return event;
+        }
+
+        @Override
+        @Nullable
+        public Event poll() {
+          Event event = super.poll();
+          if (event != null) {
+            onEventDequeued(event);
+          }
+          return event;
+        }
+
+        @Override
+        @Nullable
+        public Event poll(long timeout, TimeUnit unit) throws InterruptedException {
+          Event event = super.poll(timeout, unit);
+          if (event != null) {
+            onEventDequeued(event);
+          }
+          return event;
+        }
+      };
+
+  private void onEventDequeued(Event event) {
+    if (event instanceof Event.Terminal) {
+      finished = true;
+    }
+    if (event instanceof Event.Canceled) {
+      canceled = true;
+    }
+  }
+
+  /** The converter handling request body uploads on the user thread, if the request has a body. */
+  @Nullable private RequestBodyConverter requestBodyConverter = null;
 
   /** The read timeout as specified by OkHttp. * */
   private final long readTimeoutMillis;
@@ -152,29 +231,91 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
     this.redirectStrategy = redirectStrategy;
   }
 
+  UploadDataProvider attachRequestBody(
+      RequestBody body, long contentLength, long writeTimeoutMillis) {
+    requestBodyConverter =
+        new RequestBodyConverter(body, contentLength, writeTimeoutMillis, events);
+    return requestBodyConverter;
+  }
+
   /**
-   * Blocks until the response headers are available (or the request fails/is canceled) and returns
-   * the {@link UrlResponseInfo} along with the response body {@link Source}.
+   * Drives any request body upload on the calling thread and blocks until the response headers are
+   * available (or the request fails/is canceled), returning the {@link UrlResponseInfo} along with
+   * the response body {@link Source}.
    */
   ResponseHeaders waitForResponseHeaders(UrlRequest urlRequest) throws IOException {
     request = urlRequest;
-    while (true) {
-      Event event = takeEventUninterruptibly();
-      if (event instanceof Event.ResponseStarted) {
-        return new ResponseHeaders(((Event.ResponseStarted) event).info, new CronetBodySource());
-      } else if (event instanceof Event.RedirectReceived) {
-        // Note: This might not match the content length headers but we have no way of accessing
-        // the actual body with current Cronet's APIs (see RedirectStrategy).
-        return new ResponseHeaders(((Event.RedirectReceived) event).info, new Buffer());
-      } else if (event instanceof Event.Failed) {
-        throw new IOException(((Event.Failed) event).exception);
-      } else if (event instanceof Event.Canceled) {
-        throw new IOException("The request was canceled!");
-      } else if (event instanceof Event.ReadCompleted || event instanceof Event.Succeeded) {
-        throw new IllegalStateException("Unexpected event before response headers: " + event);
-      } else {
-        throw new AssertionError("Unexpected event: " + event);
+    boolean responseStarted = false;
+    try {
+      Event nextEvent = null;
+      while (true) {
+        Event event = nextEvent != null ? nextEvent : takeEventUninterruptibly();
+        nextEvent = null;
+        if (event instanceof Event.Upload) {
+          nextEvent = checkNotNull(requestBodyConverter).handleUploadEvent((Event.Upload) event);
+        } else if (event instanceof Event.ResponseStarted) {
+          responseStarted = true;
+          return new ResponseHeaders(((Event.ResponseStarted) event).info, new CronetBodySource());
+        } else if (event instanceof Event.RedirectReceived) {
+          if (!redirectStrategy.followRedirects()) {
+            // Note: This might not match the content length headers but we have no way of accessing
+            // the actual body with current Cronet's APIs (see RedirectStrategy).
+            return new ResponseHeaders(((Event.RedirectReceived) event).info, new Buffer());
+          }
+          throw new ProtocolException(
+              "Too many follow-up requests: "
+                  + (redirectStrategy.numberOfRedirectsToFollow() + 1));
+        } else if (event instanceof Event.Failed) {
+          throw new IOException(((Event.Failed) event).exception);
+        } else if (event instanceof Event.Canceled) {
+          throw new IOException("The request was canceled!");
+        } else {
+          throw new IllegalStateException("Unexpected event before response headers: " + event);
+        }
       }
+    } finally {
+      if (!responseStarted) {
+        // Make sure the request is cancelled if anything unexpected occurs, especially if the user
+        // throws during upload in handleUploadEvent(). (There is no point in letting the request
+        // continue if upload fails because Cronet does not support continuing on a failed upload -
+        // it will immediately fail the request anyway. Cancelling allows us to fail faster: the
+        // alternative would be to wait for the next UploadRead event and fail that, which could
+        // take an unbounded amount of time.)
+        cancelAndDrain(urlRequest);
+      }
+    }
+  }
+
+  private void cancelAndDrain(UrlRequest urlRequest) {
+    try {
+      if (!finished) {
+        urlRequest.cancel();
+        drainUntilTerminalEvent();
+      }
+    } finally {
+      if (requestBodyConverter != null) {
+        requestBodyConverter.onTerminalEvent();
+      }
+    }
+  }
+
+  private void drainUntilTerminalEvent() {
+    while (!finished) {
+      Event event = takeEventUninterruptibly();
+      if (event instanceof Event.Upload) {
+        // Record any unanswered upload callback so it is failed on termination.
+        checkNotNull(requestBodyConverter).setActiveUploadEvent((Event.Upload) event);
+      }
+    }
+  }
+
+  @Nullable
+  private Event pollEvent(long timeoutMillis) {
+    try {
+      return events.poll(timeoutMillis, MILLISECONDS);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return null;
     }
   }
 
@@ -189,26 +330,20 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
   @Override
   public void onRedirectReceived(
       UrlRequest urlRequest, UrlResponseInfo urlResponseInfo, String nextUrl) {
-    // We shouldn't follow redirects - pass the given UrlResponseInfo as the ultimate result
     if (!redirectStrategy.followRedirects()) {
       events.add(new Event.RedirectReceived(urlResponseInfo));
-      urlRequest.cancel();
       return;
     }
 
-    // We should follow redirects and we haven't hit the cap yet
     urlResponseInfoChain.add(urlResponseInfo);
     if (urlResponseInfo.getUrlChain().size() <= redirectStrategy.numberOfRedirectsToFollow()) {
       urlRequest.followRedirect();
       return;
     }
 
-    // Cap reached - cancel the request and fail. Exception crafted to match OkHttp.
-    IOException e =
-        new ProtocolException(
-            "Too many follow-up requests: " + (redirectStrategy.numberOfRedirectsToFollow() + 1));
-    events.add(new Event.Failed(e));
-    urlRequest.cancel();
+    // Cap reached: surface RedirectReceived so waitForResponseHeaders() throws ProtocolException
+    // and its finally block cancels and drains urlRequest via cancelAndDrain().
+    events.add(new Event.RedirectReceived(urlResponseInfo));
   }
 
   @Override
@@ -234,7 +369,6 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
 
   @Override
   public void onCanceled(UrlRequest urlRequest, UrlResponseInfo responseInfo) {
-    canceled.set(true);
     events.add(Event.Canceled.INSTANCE);
   }
 
@@ -248,7 +382,7 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
 
     @Override
     public long read(Buffer sink, long byteCount) throws IOException {
-      if (canceled.get()) {
+      if (canceled) {
         throw new IOException("The request was canceled!");
       }
 
@@ -257,7 +391,7 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
       checkArgument(byteCount >= 0, "byteCount < 0: %s", byteCount);
       checkState(!closed, "closed");
 
-      if (finished.get()) {
+      if (finished) {
         return -1;
       }
 
@@ -325,44 +459,37 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
       checkState(buffer.position() == 0, "Buffer position is not 0");
       checkState(buffer.limit() == buffer.capacity(), "Buffer limit is not capacity");
 
-      request.read(buffer);
+      UrlRequest localRequest = checkNotNull(request);
+      localRequest.read(buffer);
 
-      Event event;
+      boolean readCompleted = false;
       try {
-        event = events.poll(readTimeoutMillis, MILLISECONDS);
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        event = null;
-      }
-
-      if (event == null) {
-        // Either events.poll() was interrupted or it timed out.
-        request.cancel();
-        throw new CronetTimeoutException();
-      }
-
-      // We null the buffer in final statuses to allow fast GC of the buffer even if the callback
-      // is still in use.
-      if (event instanceof Event.Failed) {
-        finished.set(true);
-        buffer = null;
-        throw new IOException(((Event.Failed) event).exception);
-      } else if (event instanceof Event.Succeeded) {
-        finished.set(true);
-        buffer = null;
-        return false;
-      } else if (event instanceof Event.Canceled) {
-        // The canceled flag is already set by the onCanceled method
-        // so not setting it here.
-        buffer = null;
-        throw new IOException("The request was canceled!");
-      } else if (event instanceof Event.ReadCompleted) {
-        return true;
-      } else if (event instanceof Event.ResponseStarted
-          || event instanceof Event.RedirectReceived) {
-        throw new IllegalStateException("Unexpected event while reading body: " + event);
-      } else {
-        throw new AssertionError("Unexpected event: " + event);
+        while (true) {
+          // If pollEvent returns null, either events.poll() was interrupted or it timed out.
+          Event event = pollEvent(readTimeoutMillis);
+          if (event == null) {
+            throw new CronetTimeoutException();
+          }
+          if (event instanceof Event.Failed) {
+            throw new IOException(((Event.Failed) event).exception);
+          } else if (event instanceof Event.Succeeded) {
+            return false;
+          } else if (event instanceof Event.Canceled) {
+            throw new IOException("The request was canceled!");
+          } else if (event instanceof Event.ReadCompleted) {
+            readCompleted = true;
+            return true;
+          } else {
+            throw new IllegalStateException("Unexpected event while reading body: " + event);
+          }
+        }
+      } finally {
+        if (!readCompleted) {
+          // We null the buffer in final statuses to allow fast GC of the buffer even if the
+          // callback is still in use.
+          buffer = null;
+          cancelAndDrain(localRequest);
+        }
       }
     }
 
@@ -409,9 +536,7 @@ class OkHttpBridgeRequestCallback extends UrlRequest.Callback {
         return;
       }
       closed = true;
-      if (!finished.get()) {
-        request.cancel();
-      }
+      cancelAndDrain(checkNotNull(request));
     }
   }
 }

@@ -107,11 +107,11 @@ public final class CronetInterceptor implements Interceptor, AutoCloseable {
     try {
       requestAndOkHttpResponse.getRequest().start();
       return toInterceptorResponse(requestAndOkHttpResponse.getResponse(), chain.call());
-    } catch (RuntimeException | IOException e) {
+    } catch (Throwable t) {
       // If the response is retrieved successfully the caller is responsible for closing
       // the response, which will remove it from the active calls map.
       activeCalls.remove(chain.call());
-      throw e;
+      throw t;
     }
   }
 

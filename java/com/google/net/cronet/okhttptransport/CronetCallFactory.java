@@ -127,12 +127,12 @@ public final class CronetCallFactory implements Call.Factory {
         startRequestIfNotCanceled();
 
         return toCronetCallFactoryResponse(this, requestAndOkHttpResponse.getResponse());
-      } catch (RuntimeException | IOException e) {
+      } catch (Throwable t) {
         // If the request finished successfully don't exit the timeout yet. Reading the body also
         // needs to be considered and the body object will take care of exiting it. See
         // toCronetCallFactoryResponse() for details.
         timeout.exit();
-        throw e;
+        throw t;
       }
     }
 

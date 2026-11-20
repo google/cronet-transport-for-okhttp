@@ -17,18 +17,35 @@
 package com.google.net.cronet.okhttptransport;
 
 import static com.google.common.truth.Truth.assertThat;
+import static java.lang.Math.min;
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.Assert.assertThrows;
 
+import android.content.Context;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.platform.app.InstrumentationRegistry;
 import com.google.common.base.Strings;
+import com.google.common.io.ByteStreams;
 import com.google.net.cronet.testing.CronetEngineTestAppRule;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
+import java.security.KeyFactory;
+import java.security.KeyPair;
+import java.security.PrivateKey;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.annotation.Nullable;
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.MediaType;
@@ -41,6 +58,10 @@ import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
+import okhttp3.mockwebserver.SocketPolicy;
+import okhttp3.tls.HandshakeCertificates;
+import okhttp3.tls.HeldCertificate;
+import okio.BufferedSink;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -256,6 +277,509 @@ public class CronetInterceptorEndToEndTest {
     IOException e = assertThrows(IOException.class, () -> client.newCall(request).execute());
 
     assertThat(e).hasMessageThat().contains("Too many follow-up requests: 17");
+  }
+
+  @Test
+  public void testRequestBodyCallbacks_runOnCallerThread() throws Exception {
+    server.enqueue(new MockResponse().setResponseCode(307).addHeader("Location: /b"));
+    server.enqueue(new MockResponse().setResponseCode(200).setBody("Reached /b!"));
+
+    Thread callerThread = Thread.currentThread();
+    List<Thread> contentTypeThreads = new ArrayList<>();
+    List<Thread> contentLengthThreads = new ArrayList<>();
+    List<Thread> isOneShotThreads = new ArrayList<>();
+    List<Thread> writeToThreads = new ArrayList<>();
+    RequestBody delegateBody = RequestBody.create(UTF_8_TEXT, "Request Body");
+
+    RequestBody requestBody =
+        new RequestBody() {
+          @Override
+          @Nullable
+          public MediaType contentType() {
+            contentTypeThreads.add(Thread.currentThread());
+            return delegateBody.contentType();
+          }
+
+          @Override
+          public long contentLength() throws IOException {
+            contentLengthThreads.add(Thread.currentThread());
+            return delegateBody.contentLength();
+          }
+
+          @Override
+          public boolean isOneShot() {
+            isOneShotThreads.add(Thread.currentThread());
+            return false;
+          }
+
+          @Override
+          public void writeTo(BufferedSink sink) throws IOException {
+            writeToThreads.add(Thread.currentThread());
+            delegateBody.writeTo(sink);
+          }
+        };
+
+    OkHttpClient client = new OkHttpClient.Builder().addInterceptor(underTest).build();
+    Request request = new Request.Builder().post(requestBody).url(server.url("/a")).build();
+
+    try (Response response = client.newCall(request).execute()) {
+      assertThat(response.code()).isEqualTo(200);
+      assertThat(response.body().string()).isEqualTo("Reached /b!");
+    }
+
+    assertThat(server.takeRequest().getBody().readUtf8()).isEqualTo("Request Body");
+    assertThat(server.takeRequest().getBody().readUtf8()).isEqualTo("Request Body");
+
+    assertThat(contentTypeThreads).isNotEmpty();
+    assertThat(new LinkedHashSet<>(contentTypeThreads)).containsExactly(callerThread);
+    assertThat(contentLengthThreads).containsExactly(callerThread);
+    assertThat(isOneShotThreads).containsExactly(callerThread);
+    assertThat(writeToThreads).containsExactly(callerThread, callerThread);
+    assertThat(callerThread.isInterrupted()).isFalse();
+  }
+
+  @Test
+  public void
+      testEarlyErrorResponseDuringUpload_deliversErrorResponseEvenIfWriteToSwallowsExceptions()
+          throws Exception {
+    server.enqueue(
+        new MockResponse()
+            .setResponseCode(413)
+            .addHeader("Connection", "close")
+            .setBody("Payload too large")
+            .setSocketPolicy(SocketPolicy.DO_NOT_READ_REQUEST_BODY));
+
+    RequestBody requestBody =
+        new RequestBody() {
+          @Override
+          public MediaType contentType() {
+            return UTF_8_TEXT;
+          }
+
+          @Override
+          public long contentLength() {
+            return BODY_CONTENT.length;
+          }
+
+          @Override
+          public void writeTo(BufferedSink sink) {
+            try {
+              int offset = 0;
+              while (offset < BODY_CONTENT.length) {
+                int chunk = min(8192, BODY_CONTENT.length - offset);
+                sink.write(BODY_CONTENT, offset, chunk);
+                sink.flush();
+                offset += chunk;
+              }
+            } catch (IOException ignored) {
+              // Swallow abort/socket IOException and attempt extra operations before returning.
+            }
+            try {
+              sink.close();
+            } catch (IOException ignored) {
+              // Expected.
+            }
+          }
+        };
+
+    OkHttpClient client = new OkHttpClient.Builder().addInterceptor(underTest).build();
+    Request request = new Request.Builder().post(requestBody).url(server.url("/upload")).build();
+
+    try (Response response = client.newCall(request).execute()) {
+      assertThat(response.code()).isEqualTo(413);
+      assertThat(response.body().string()).isEqualTo("Payload too large");
+    }
+    assertThat(Thread.currentThread().isInterrupted()).isFalse();
+  }
+
+  @Test
+  public void testEarlyResponseBetweenUploadReads_responseCanStillBeRead() throws Exception {
+    enableProtocol(Protocol.HTTP_2);
+
+    CountDownLatch readyForEarlyResponse = new CountDownLatch(1);
+    server.setDispatcher(
+        new Dispatcher() {
+          @Override
+          public MockResponse peek() {
+            return new MockResponse().setSocketPolicy(SocketPolicy.DO_NOT_READ_REQUEST_BODY);
+          }
+
+          @Override
+          public MockResponse dispatch(RecordedRequest request) throws InterruptedException {
+            assertThat(readyForEarlyResponse.await(5, SECONDS)).isTrue();
+            return new MockResponse()
+                .setResponseCode(413)
+                .setBody("Payload too large")
+                .setSocketPolicy(SocketPolicy.DO_NOT_READ_REQUEST_BODY);
+          }
+        });
+
+    AtomicReference<IOException> abortException = new AtomicReference<>();
+    RequestBody requestBody =
+        new RequestBody() {
+          @Override
+          public MediaType contentType() {
+            return UTF_8_TEXT;
+          }
+
+          @Override
+          public long contentLength() {
+            return 128 * 1024L;
+          }
+
+          @Override
+          public void writeTo(BufferedSink sink) throws IOException {
+            // Each 16 KiB write fills one Cronet UploadDataProvider.read() buffer and commits it
+            // via onReadSucceeded(false), leaving activeUploadEvent == null. After 4 writes
+            // (64 KiB), the HTTP/2 stream's 65,535-byte flow-control send window is full (since
+            // the server does not read the request body), so Cronet does not issue a 5th
+            // UploadDataProvider.read().
+            for (int i = 0; i < 4; i++) {
+              sink.write(new byte[16 * 1024]);
+              sink.flush();
+            }
+            readyForEarlyResponse.countDown();
+            // This 5th write blocks in obtainActiveRead() with activeUploadEvent == null
+            // (in-between upload reads) until the server's 413 response triggers
+            // onResponseStarted().
+            try {
+              sink.write(new byte[16 * 1024]);
+              sink.flush();
+            } catch (IOException e) {
+              abortException.set(e);
+            }
+            try {
+              sink.close();
+            } catch (IOException ignored) {
+              // Expected.
+            }
+          }
+        };
+
+    OkHttpClient client = new OkHttpClient.Builder().addInterceptor(underTest).build();
+    Request request = new Request.Builder().post(requestBody).url(server.url("/upload")).build();
+
+    try (Response response = client.newCall(request).execute()) {
+      assertThat(response.protocol()).isEqualTo(Protocol.HTTP_2);
+      assertThat(response.code()).isEqualTo(413);
+      assertThat(response.body().string()).isEqualTo("Payload too large");
+    }
+    assertThat(abortException.get())
+        .hasMessageThat()
+        .contains("Upload aborted because response started (HTTP 413)");
+    assertThat(Thread.currentThread().isInterrupted()).isFalse();
+  }
+
+  @Test
+  public void testEarlyResponseInMiddleOfUploadRead_responseCanStillBeRead() throws Exception {
+    enableProtocol(Protocol.HTTP_2);
+
+    CountDownLatch writeToEntered = new CountDownLatch(1);
+    CountDownLatch uploadDispatched = new CountDownLatch(1);
+    server.setDispatcher(
+        new Dispatcher() {
+          @Override
+          public MockResponse peek() {
+            return new MockResponse().setSocketPolicy(SocketPolicy.DO_NOT_READ_REQUEST_BODY);
+          }
+
+          @Override
+          public MockResponse dispatch(RecordedRequest request) throws InterruptedException {
+            if ("/upload".equals(request.getPath())) {
+              assertThat(writeToEntered.await(5, SECONDS)).isTrue();
+              uploadDispatched.countDown();
+              return new MockResponse()
+                  .setResponseCode(413)
+                  .setBody("Payload too large")
+                  .setSocketPolicy(SocketPolicy.DO_NOT_READ_REQUEST_BODY);
+            } else if ("/barrier".equals(request.getPath())) {
+              return new MockResponse()
+                  .setResponseCode(200)
+                  .setBody("ok")
+                  .setBodyDelay(50, MILLISECONDS);
+            } else {
+              throw new IllegalStateException("Unexpected path: " + request.getPath());
+            }
+          }
+        });
+
+    OkHttpClient client = new OkHttpClient.Builder().addInterceptor(underTest).build();
+    AtomicReference<IOException> abortException = new AtomicReference<>();
+    RequestBody requestBody =
+        new RequestBody() {
+          @Override
+          public MediaType contentType() {
+            return UTF_8_TEXT;
+          }
+
+          @Override
+          public long contentLength() {
+            return 64 * 1024L;
+          }
+
+          @Override
+          public void writeTo(BufferedSink sink) throws IOException {
+            // Entering writeTo() means Cronet has called the first UploadDataProvider.read() and
+            // activeUploadEvent is currently held open (uncommitted) waiting for bytes.
+            writeToEntered.countDown();
+            try {
+              assertThat(uploadDispatched.await(5, SECONDS)).isTrue();
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+              throw new AssertionError(e);
+            }
+            // Send a barrier request over the same HTTP/2 connection so that when it completes,
+            // Cronet has already received the earlier 413 response frames for /upload and invoked
+            // onResponseStarted() while the first upload read is still active.
+            try (Response barrierResponse =
+                client
+                    .newCall(new Request.Builder().url(server.url("/barrier")).build())
+                    .execute()) {
+              assertThat(barrierResponse.code()).isEqualTo(200);
+            }
+
+            // Because Event.ResponseStarted is already queued while the first UploadRead is still
+            // active, the very first write/flush must immediately throw
+            // InterruptedByCronetException without completing the first UploadRead.
+            try {
+              sink.write(new byte[100]);
+              sink.flush();
+            } catch (IOException e) {
+              abortException.set(e);
+            }
+            try {
+              sink.close();
+            } catch (IOException ignored) {
+              // Expected.
+            }
+          }
+        };
+
+    Request request = new Request.Builder().post(requestBody).url(server.url("/upload")).build();
+
+    try (Response response = client.newCall(request).execute()) {
+      assertThat(response.protocol()).isEqualTo(Protocol.HTTP_2);
+      assertThat(response.code()).isEqualTo(413);
+      assertThat(response.body().string()).isEqualTo("Payload too large");
+    }
+    assertThat(abortException.get())
+        .hasMessageThat()
+        .contains("Upload aborted because response started (HTTP 413)");
+    assertThat(Thread.currentThread().isInterrupted()).isFalse();
+  }
+
+  @Test
+  public void testWriteTimeout_stalledUploadFailsEvenIfWriteToSwallowsExceptions()
+      throws Exception {
+    CountDownLatch releaseServer = new CountDownLatch(1);
+    server.setDispatcher(
+        new Dispatcher() {
+          @Override
+          public MockResponse peek() {
+            return new MockResponse().setSocketPolicy(SocketPolicy.DO_NOT_READ_REQUEST_BODY);
+          }
+
+          @Override
+          public MockResponse dispatch(RecordedRequest request) throws InterruptedException {
+            releaseServer.await(10, SECONDS);
+            return new MockResponse().setResponseCode(200);
+          }
+        });
+
+    byte[] chunk = new byte[64 * 1024];
+    long totalBytes = 64L * 1024 * 1024;
+    RequestBody requestBody =
+        new RequestBody() {
+          @Override
+          public MediaType contentType() {
+            return UTF_8_TEXT;
+          }
+
+          @Override
+          public long contentLength() {
+            return totalBytes;
+          }
+
+          @Override
+          public void writeTo(BufferedSink sink) {
+            long written = 0L;
+            while (written < totalBytes) {
+              try {
+                sink.write(chunk);
+                sink.flush();
+                written += chunk.length;
+              } catch (Throwable ignored) {
+                break;
+              }
+            }
+            try {
+              sink.close();
+            } catch (Throwable ignored) {
+              // Expected.
+            }
+          }
+        };
+
+    OkHttpClient client =
+        new OkHttpClient.Builder()
+            .writeTimeout(200, MILLISECONDS)
+            .addInterceptor(underTest)
+            .build();
+    Request request = new Request.Builder().post(requestBody).url(server.url("/upload")).build();
+
+    try {
+      assertThrows(CronetTimeoutException.class, () -> client.newCall(request).execute());
+      assertThat(Thread.currentThread().isInterrupted()).isFalse();
+    } finally {
+      releaseServer.countDown();
+    }
+  }
+
+  @Test
+  public void
+      testUploadErrorDuringStalledUpload_cancelsUrlRequestImmediatelyWithoutWaitingForNextRead()
+          throws Exception {
+    CountDownLatch releaseServer = new CountDownLatch(1);
+    server.setDispatcher(
+        new Dispatcher() {
+          @Override
+          public MockResponse peek() {
+            return new MockResponse().setSocketPolicy(SocketPolicy.DO_NOT_READ_REQUEST_BODY);
+          }
+
+          @Override
+          public MockResponse dispatch(RecordedRequest request) throws InterruptedException {
+            releaseServer.await(10, SECONDS);
+            return new MockResponse().setResponseCode(200);
+          }
+        });
+
+    FileNotFoundException expectedFailure = new FileNotFoundException("Disk read failure mid-upload");
+    RequestBody requestBody =
+        new RequestBody() {
+          @Override
+          public MediaType contentType() {
+            return UTF_8_TEXT;
+          }
+
+          @Override
+          public long contentLength() {
+            return 64L * 1024 * 1024;
+          }
+
+          @Override
+          public void writeTo(BufferedSink sink) throws IOException {
+            sink.write(new byte[16 * 1024]);
+            sink.flush();
+            throw expectedFailure;
+          }
+        };
+
+    OkHttpClient client =
+        new OkHttpClient.Builder()
+            .writeTimeout(60, SECONDS)
+            .readTimeout(60, SECONDS)
+            .addInterceptor(underTest)
+            .build();
+    Request request = new Request.Builder().post(requestBody).url(server.url("/upload")).build();
+
+    try {
+      FileNotFoundException thrown =
+          assertThrows(FileNotFoundException.class, () -> client.newCall(request).execute());
+      assertThat(thrown).isSameInstanceAs(expectedFailure);
+      assertThat(Thread.currentThread().isInterrupted()).isFalse();
+    } finally {
+      releaseServer.countDown();
+    }
+  }
+
+  @Test
+  public void testRequestBodySwallowsLengthMismatchException_stillFailsCall() throws Exception {
+    server.enqueue(new MockResponse().setResponseCode(200).setBody("Unexpected success"));
+
+    RequestBody requestBody =
+        new RequestBody() {
+          @Override
+          public MediaType contentType() {
+            return UTF_8_TEXT;
+          }
+
+          @Override
+          public long contentLength() {
+            return 16 * 1024L;
+          }
+
+          @Override
+          public void writeTo(BufferedSink sink) throws IOException {
+            sink.write(new byte[8 * 1024]);
+            try {
+              sink.close();
+            } catch (IOException ignored) {
+              // Swallow body-too-short exception and return normally.
+            }
+          }
+        };
+
+    OkHttpClient client = new OkHttpClient.Builder().addInterceptor(underTest).build();
+    Request request = new Request.Builder().post(requestBody).url(server.url("/upload")).build();
+
+    IOException e = assertThrows(IOException.class, () -> client.newCall(request).execute());
+    assertThat(e).hasMessageThat().contains("The source has been exhausted");
+    assertThat(Thread.currentThread().isInterrupted()).isFalse();
+  }
+
+  @Test
+  public void testRequestBodyThrowsRuntimeException_cancelsUrlRequestAndPropagates()
+      throws Exception {
+    server.enqueue(new MockResponse().setResponseCode(200).setBody("Unexpected success"));
+
+    RequestBody requestBody =
+        new RequestBody() {
+          @Override
+          public MediaType contentType() {
+            return UTF_8_TEXT;
+          }
+
+          @Override
+          public long contentLength() {
+            return 16 * 1024L;
+          }
+
+          @Override
+          public void writeTo(BufferedSink sink) throws IOException {
+            sink.write(new byte[8 * 1024]);
+            sink.flush();
+            throw new IllegalStateException("writeTo boom");
+          }
+        };
+
+    OkHttpClient client = new OkHttpClient.Builder().addInterceptor(underTest).build();
+    Request request = new Request.Builder().post(requestBody).url(server.url("/upload")).build();
+
+    IllegalStateException thrown =
+        assertThrows(IllegalStateException.class, () -> client.newCall(request).execute());
+    assertThat(thrown).hasMessageThat().isEqualTo("writeTo boom");
+    assertThat(Thread.currentThread().isInterrupted()).isFalse();
+  }
+
+  private void enableProtocol(Protocol protocol) throws Exception {
+    Context context = InstrumentationRegistry.getInstrumentation().getContext();
+    final X509Certificate certificate;
+    try (InputStream certIs = context.getResources().openRawResource(R.raw.localhost_cert)) {
+      certificate =
+          (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(certIs);
+    }
+    final PrivateKey privateKey;
+    try (InputStream keyIs = context.getResources().openRawResource(R.raw.localhost_key)) {
+      PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(ByteStreams.toByteArray(keyIs));
+      privateKey = KeyFactory.getInstance("RSA").generatePrivate(keySpec);
+    }
+    HeldCertificate heldCertificate =
+        new HeldCertificate(new KeyPair(certificate.getPublicKey(), privateKey), certificate);
+    HandshakeCertificates handshakeCertificates =
+        new HandshakeCertificates.Builder().heldCertificate(heldCertificate).build();
+    server.useHttps(handshakeCertificates.sslSocketFactory(), false);
+    server.setProtocols(Arrays.asList(protocol, Protocol.HTTP_1_1));
   }
 
   private static void assertEchoRequest(
