@@ -16,7 +16,7 @@
 
 package com.google.net.cronet.okhttptransport;
 
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static com.google.common.base.Preconditions.checkArgument;
 
 import com.google.common.base.Verify;
 import com.google.common.util.concurrent.FutureCallback;
@@ -24,14 +24,14 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
-import com.google.common.util.concurrent.Uninterruptibles;
 import com.google.net.cronet.okhttptransport.UploadBodyDataBroker.ReadResult;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.Future;
+import java.util.function.Consumer;
+import javax.annotation.Nullable;
 import okhttp3.RequestBody;
 import okio.BufferedSink;
 import okio.Okio;
@@ -43,41 +43,40 @@ import org.chromium.net.UploadDataSink;
  * the entire request body in memory.
  *
  * <ol>
- *   <li>{@link RequestBody#writeTo(BufferedSink)} is invoked on the body, but the sink doesn't
- *       accept any data
- *   <li>A call to {@link UploadDataProvider#read(UploadDataSink, ByteBuffer)} unblocks the sink,
- *       which accepts a part of the body (size depends on the buffer's capacity), then blocks
- *       again. Buffer is sent to Cronet.
+ *   <li>{@link RequestBody#writeTo(BufferedSink)} is invoked on the body in a background task,
+ *       where the sink blocks until Cronet requests data.
+ *   <li>A non-blocking call to {@link UploadDataProvider#read(UploadDataSink, ByteBuffer)} enqueues
+ *       Cronet's buffer, unblocking the background sink to copy a chunk of the body into the buffer
+ *       and invoke {@link UploadDataSink#onReadSucceeded(boolean)}, before blocking again until the
+ *       next read.
  * </ol>
  *
  * This is repeated until the entire body has been read.
  */
 final class RequestBodyConverter extends UploadDataProvider {
   private final RequestBody okHttpRequestBody;
-  private UploadBodyDataBroker broker = new UploadBodyDataBroker();
+  private volatile UploadBodyDataBroker broker = new UploadBodyDataBroker();
   private final ListeningExecutorService readTaskExecutor;
-  private final long writeTimeoutMillis;
+  private final int writeTimeoutMillis;
 
   /** The future for the task that reads the OkHttp request body in the background. */
-  private ListenableFuture<?> readTaskFuture;
+  private volatile ListenableFuture<?> readTaskFuture;
 
   /** The number of bytes we read from the OkHttp body thus far. */
-  private long totalBytesReadFromOkHttp;
+  private volatile long totalBytesReadFromOkHttp;
 
   RequestBodyConverter(
       RequestBody okHttpRequestBody,
       ExecutorService readTaskExecutor,
       int writeTimeoutMillis) {
+    checkArgument(writeTimeoutMillis >= 0);
     this.okHttpRequestBody = okHttpRequestBody;
     if (readTaskExecutor instanceof ListeningExecutorService) {
       this.readTaskExecutor = (ListeningExecutorService) readTaskExecutor;
     } else {
       this.readTaskExecutor = MoreExecutors.listeningDecorator(readTaskExecutor);
     }
-
-    // So that we don't have to special case infinity. Int.MAX_VALUE is ~infinity for all
-    // practical use cases.
-    this.writeTimeoutMillis = writeTimeoutMillis == 0 ? Integer.MAX_VALUE : writeTimeoutMillis;
+    this.writeTimeoutMillis = writeTimeoutMillis;
   }
 
   @Override
@@ -89,39 +88,46 @@ final class RequestBodyConverter extends UploadDataProvider {
   public void read(UploadDataSink uploadDataSink, ByteBuffer byteBuffer) throws IOException {
     ensureReadTaskStarted();
 
-    if (getLength() == -1) {
+    long expectedLength = getLength();
+    if (expectedLength == -1) {
       readUnknownBodyLength(uploadDataSink, byteBuffer);
     } else {
-      readKnownBodyLength(uploadDataSink, byteBuffer);
+      readKnownBodyLength(uploadDataSink, byteBuffer, expectedLength);
     }
   }
 
-  private void readKnownBodyLength(UploadDataSink uploadDataSink, ByteBuffer byteBuffer)
-      throws IOException {
-    try {
-      UploadBodyDataBroker.ReadResult readResult = readFromOkHttp(byteBuffer);
+  private void readKnownBodyLength(
+      UploadDataSink uploadDataSink, ByteBuffer byteBuffer, long expectedLength) {
+    Future<?> currentReadTask = readTaskFuture;
+    readFromOkHttp(
+        uploadDataSink,
+        byteBuffer,
+        readResult -> {
+          if (totalBytesReadFromOkHttp > expectedLength) {
+            failRead(
+                uploadDataSink,
+                currentReadTask,
+                prepareBodyTooLongException(expectedLength, totalBytesReadFromOkHttp));
+            return;
+          }
 
-      if (totalBytesReadFromOkHttp > getLength()) {
-        throw prepareBodyTooLongException(getLength(), totalBytesReadFromOkHttp);
-      }
-
-      if (totalBytesReadFromOkHttp < getLength()) {
-        switch (readResult) {
-          case SUCCESS:
-            uploadDataSink.onReadSucceeded(false);
-            break;
-          case END_OF_BODY:
-            throw new IOException("The source has been exhausted but we expected more data!");
-        }
-        return;
-      }
-      // Else we're handling what's supposed to be the last chunk
-      handleLastBodyRead(uploadDataSink, byteBuffer);
-
-    } catch (TimeoutException | ExecutionException e) {
-      readTaskFuture.cancel(true);
-      uploadDataSink.onReadError(new IOException(e));
-    }
+          if (totalBytesReadFromOkHttp < expectedLength) {
+            switch (readResult) {
+              case SUCCESS:
+                uploadDataSink.onReadSucceeded(false);
+                break;
+              case END_OF_BODY:
+                failRead(
+                    uploadDataSink,
+                    currentReadTask,
+                    new IOException("The source has been exhausted but we expected more data!"));
+                break;
+            }
+            return;
+          }
+          // Else we're handling what's supposed to be the last chunk
+          handleLastBodyRead(uploadDataSink, byteBuffer, expectedLength);
+        });
   }
 
   /**
@@ -130,39 +136,44 @@ final class RequestBodyConverter extends UploadDataProvider {
    * when we read the advertised number of bytes, we need to make sure that the stream is indeed
    * finished.
    */
-  private void handleLastBodyRead(UploadDataSink uploadDataSink, ByteBuffer filledByteBuffer)
-      throws IOException, TimeoutException, ExecutionException {
+  private void handleLastBodyRead(
+      UploadDataSink uploadDataSink, ByteBuffer filledByteBuffer, long expectedLength) {
     // We reuse the same buffer for the END_OF_DATA read (it should be non-destructive and if
     // it overwrites what's in there we don't mind as that's an error anyway). We just need
     // to make sure we restore the original position afterwards. We don't use mark() / reset()
     // as the mark position can be invalidated by limit manipulation.
+    Future<?> currentReadTask = readTaskFuture;
     int bufferPosition = filledByteBuffer.position();
     filledByteBuffer.position(0);
 
-    UploadBodyDataBroker.ReadResult readResult = readFromOkHttp(filledByteBuffer);
+    readFromOkHttp(
+        uploadDataSink,
+        filledByteBuffer,
+        readResult -> {
+          if (!readResult.equals(ReadResult.END_OF_BODY)) {
+            failRead(
+                uploadDataSink,
+                currentReadTask,
+                prepareBodyTooLongException(expectedLength, totalBytesReadFromOkHttp));
+            return;
+          }
 
-    if (!readResult.equals(ReadResult.END_OF_BODY)) {
-      throw prepareBodyTooLongException(getLength(), totalBytesReadFromOkHttp);
-    }
+          Verify.verify(
+              filledByteBuffer.position() == 0,
+              "END_OF_BODY reads shouldn't write anything to the buffer");
 
-    Verify.verify(
-        filledByteBuffer.position() == 0,
-        "END_OF_BODY reads shouldn't write anything to the buffer");
+          // revert the position change
+          filledByteBuffer.position(bufferPosition);
 
-    // revert the position change
-    filledByteBuffer.position(bufferPosition);
-
-    uploadDataSink.onReadSucceeded(false);
+          uploadDataSink.onReadSucceeded(false);
+        });
   }
 
   private void readUnknownBodyLength(UploadDataSink uploadDataSink, ByteBuffer byteBuffer) {
-    try {
-      UploadBodyDataBroker.ReadResult readResult = readFromOkHttp(byteBuffer);
-      uploadDataSink.onReadSucceeded(readResult.equals(ReadResult.END_OF_BODY));
-    } catch (TimeoutException | ExecutionException e) {
-      readTaskFuture.cancel(true);
-      uploadDataSink.onReadError(new IOException(e));
-    }
+    readFromOkHttp(
+        uploadDataSink,
+        byteBuffer,
+        readResult -> uploadDataSink.onReadSucceeded(readResult.equals(ReadResult.END_OF_BODY)));
   }
 
   /**
@@ -216,15 +227,46 @@ final class RequestBodyConverter extends UploadDataProvider {
     }
   }
 
-  private ReadResult readFromOkHttp(ByteBuffer byteBuffer)
-      throws TimeoutException, ExecutionException {
+  private void readFromOkHttp(
+      UploadDataSink uploadDataSink, ByteBuffer byteBuffer, Consumer<ReadResult> onSuccess) {
+    UploadBodyDataBroker currentBroker = broker;
+    Future<?> currentReadTask = readTaskFuture;
     int positionBeforeRead = byteBuffer.position();
-    UploadBodyDataBroker.ReadResult readResult =
-        Uninterruptibles.getUninterruptibly(
-            broker.enqueueBodyRead(byteBuffer), writeTimeoutMillis, MILLISECONDS);
-    int bytesRead = byteBuffer.position() - positionBeforeRead;
-    totalBytesReadFromOkHttp += bytesRead;
-    return readResult;
+    currentBroker.enqueueBodyRead(
+        byteBuffer,
+        writeTimeoutMillis,
+        new FutureCallback<ReadResult>() {
+          @Override
+          public void onSuccess(@Nullable ReadResult readResult) {
+            if (currentBroker != broker) {
+              return;
+            }
+            int bytesRead = byteBuffer.position() - positionBeforeRead;
+            totalBytesReadFromOkHttp += bytesRead;
+            onSuccess.accept(Verify.verifyNotNull(readResult));
+          }
+
+          @Override
+          public void onFailure(Throwable t) {
+            if (currentBroker != broker) {
+              return;
+            }
+            failRead(uploadDataSink, currentReadTask, t);
+          }
+        });
+  }
+
+  // We deliberately interrupt the background body-reading task on error/timeout so
+  // UploadBodyDataBroker#getPendingCronetRead (which blocks on pendingRead.take()) unblocks
+  // and terminates instead of leaking the executor thread.
+  @SuppressWarnings("Interruption")
+  private static void failRead(
+      UploadDataSink uploadDataSink, @Nullable Future<?> readTask, Throwable cause) {
+    uploadDataSink.onReadError(
+        cause instanceof IOException ? (IOException) cause : new IOException(cause));
+    if (readTask != null) {
+      readTask.cancel(true);
+    }
   }
 
   private static IOException prepareBodyTooLongException(
@@ -262,5 +304,14 @@ final class RequestBodyConverter extends UploadDataProvider {
     broker = new UploadBodyDataBroker();
 
     uploadDataSink.onRewindSucceeded();
+  }
+
+  @Override
+  @SuppressWarnings("Interruption") // See comment on failRead.
+  public void close() {
+    Future<?> currentReadTask = readTaskFuture;
+    if (currentReadTask != null) {
+      currentReadTask.cancel(true);
+    }
   }
 }

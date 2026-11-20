@@ -20,7 +20,6 @@ import android.util.Log;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import java.io.IOException;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import okhttp3.MediaType;
 import okhttp3.Request;
@@ -37,19 +36,16 @@ final class RequestResponseConverter {
   private static final String TAG = "CronetTransportForOkHttp";
 
   private final CronetEngine cronetEngine;
-  private final Executor uploadDataProviderExecutor;
   private final ExecutorService requestBodyReaderExecutor;
   private final ResponseConverter responseConverter;
   private final RedirectStrategy redirectStrategy;
 
   RequestResponseConverter(
       CronetEngine cronetEngine,
-      Executor uploadDataProviderExecutor,
       ExecutorService requestBodyReaderExecutor,
       ResponseConverter responseConverter,
       RedirectStrategy redirectStrategy) {
     this.cronetEngine = cronetEngine;
-    this.uploadDataProviderExecutor = uploadDataProviderExecutor;
     this.requestBodyReaderExecutor = requestBodyReaderExecutor;
     this.responseConverter = responseConverter;
     this.redirectStrategy = redirectStrategy;
@@ -121,9 +117,11 @@ final class RequestResponseConverter {
           builder.addHeader(CONTENT_TYPE_HEADER_NAME, CONTENT_TYPE_HEADER_DEFAULT_VALUE);
         }
 
+        // RequestBodyConverter methods are non-blocking (reads complete asynchronously from
+        // requestBodyReaderExecutor), so use a direct executor to avoid extra thread hops.
         builder.setUploadDataProvider(
             new RequestBodyConverter(body, requestBodyReaderExecutor, writeTimeoutMillis),
-            uploadDataProviderExecutor);
+            MoreExecutors.directExecutor());
       }
     }
 

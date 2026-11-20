@@ -17,17 +17,21 @@
 package com.google.net.cronet.okhttptransport;
 
 import static com.google.common.base.Preconditions.checkState;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 import android.util.Pair;
+import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.SettableFuture;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.Future;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import okio.AsyncTimeout;
 import okio.Buffer;
 import okio.Sink;
 import okio.Timeout;
@@ -61,21 +65,45 @@ final class UploadBodyDataBroker implements Sink {
   /**
    * Indicates that Cronet is ready to receive another body part.
    *
-   * <p>This method is executed by Cronet's upload data provider.
+   * <p>This method is executed by Cronet's upload data provider and does not block. {@code
+   * callback} is invoked when the read completes or fails.
    */
-  Future<ReadResult> enqueueBodyRead(ByteBuffer readBuffer) {
+  void enqueueBodyRead(
+      ByteBuffer readBuffer, int timeoutMillis, FutureCallback<ReadResult> callback) {
     Throwable backgroundThrowable = backgroundReadThrowable.get();
     if (backgroundThrowable != null) {
-      return Futures.immediateFailedFuture(backgroundThrowable);
+      callback.onFailure(backgroundThrowable);
+      return;
     }
     SettableFuture<ReadResult> future = SettableFuture.create();
-    pendingRead.add(Pair.create(readBuffer, future));
+    Futures.addCallback(future, callback, MoreExecutors.directExecutor());
+    Pair<ByteBuffer, SettableFuture<ReadResult>> entry = Pair.create(readBuffer, future);
+    pendingRead.add(entry);
 
-    // Properly handle interleaving handleBackgroundReadError / enqueueBodyRead calls.
-    if ((backgroundThrowable = backgroundReadThrowable.get()) != null) {
+    if (timeoutMillis > 0 && !future.isDone()) {
+      AsyncTimeout timeout =
+          new AsyncTimeout() {
+            @Override
+            protected void timedOut() {
+              if (pendingRead.remove(entry)) {
+                future.setException(new TimeoutException());
+              }
+            }
+          };
+      timeout.timeout(timeoutMillis, MILLISECONDS);
+      timeout.enter();
+      future.addListener(
+          () -> {
+            boolean unused = timeout.exit();
+          },
+          MoreExecutors.directExecutor());
+    }
+
+    // Properly handle interleaving setBackgroundReadError / enqueueBodyRead calls.
+    if ((backgroundThrowable = backgroundReadThrowable.get()) != null
+        && pendingRead.remove(entry)) {
       future.setException(backgroundThrowable);
     }
-    return future;
   }
 
   /**

@@ -17,6 +17,7 @@
 package com.google.net.cronet.okhttptransport;
 
 import static com.google.common.truth.Truth.assertThat;
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.Assert.assertThrows;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -24,9 +25,12 @@ import com.google.common.util.concurrent.SettableFuture;
 import com.google.common.util.concurrent.Uninterruptibles;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import okhttp3.MediaType;
 import okhttp3.RequestBody;
 import okio.Buffer;
@@ -78,8 +82,9 @@ public class RequestBodyConverterTest {
     RequestBody requestBody = new TestRequestBody(content, KB_56 + 1);
     UploadDataProvider provider = new RequestBodyConverter(requestBody, executor, NO_TIMEOUT);
 
-    IOException exception = assertThrows(IOException.class, () -> readAll(provider));
-    assertThat(exception).hasMessageThat().contains("The source has been exhausted");
+    ExecutionException exception = assertThrows(ExecutionException.class, () -> readAll(provider));
+    assertThat(exception).hasCauseThat().isInstanceOf(IOException.class);
+    assertThat(exception).hasCauseThat().hasMessageThat().contains("The source has been exhausted");
   }
 
   @Test
@@ -88,10 +93,26 @@ public class RequestBodyConverterTest {
     RequestBody requestBody = new TestRequestBody(content, KB_56 - 1);
     UploadDataProvider provider = new RequestBodyConverter(requestBody, executor, NO_TIMEOUT);
 
-    IOException exception = assertThrows(IOException.class, () -> readAll(provider));
+    ExecutionException exception = assertThrows(ExecutionException.class, () -> readAll(provider));
+    assertThat(exception).hasCauseThat().isInstanceOf(IOException.class);
     assertThat(exception)
+        .hasCauseThat()
         .hasMessageThat()
         .contains("Expected " + (KB_56 - 1) + " bytes but got at least " + KB_56);
+  }
+
+  @Test
+  public void testKnownLength_actualBodyTooLongOnChunkBoundary() throws Exception {
+    byte[] content = TestUtils.generateRandomBytesArray(KB_56 + 1);
+    RequestBody requestBody = new TestRequestBody(content, KB_56);
+    UploadDataProvider provider = new RequestBodyConverter(requestBody, executor, NO_TIMEOUT);
+
+    ExecutionException exception = assertThrows(ExecutionException.class, () -> readAll(provider));
+    assertThat(exception).hasCauseThat().isInstanceOf(IOException.class);
+    assertThat(exception)
+        .hasCauseThat()
+        .hasMessageThat()
+        .contains("Expected " + KB_56 + " bytes but got at least " + (KB_56 + 1));
   }
 
   @Test
@@ -171,6 +192,119 @@ public class RequestBodyConverterTest {
     assertThat(readAll(provider)).isEqualTo(content);
     ExecutionException exception = assertThrows(ExecutionException.class, () -> rewind(provider));
     assertThat(exception).hasCauseThat().isInstanceOf(UnsupportedOperationException.class);
+  }
+
+  @Test
+  public void testRead_doesNotBlockAndCompletesOnReadTask() throws Exception {
+    byte[] content = TestUtils.generateRandomBytesArray(1024);
+    CountDownLatch writeStarted = new CountDownLatch(1);
+    CountDownLatch allowWrite = new CountDownLatch(1);
+    AtomicReference<Thread> writeThread = new AtomicReference<>();
+    RequestBody requestBody =
+        new RequestBody() {
+          @Override
+          public MediaType contentType() {
+            return null;
+          }
+
+          @Override
+          public long contentLength() {
+            return content.length;
+          }
+
+          @Override
+          public void writeTo(BufferedSink sink) throws IOException {
+            writeThread.set(Thread.currentThread());
+            writeStarted.countDown();
+            try {
+              assertThat(allowWrite.await(5, SECONDS)).isTrue();
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+              throw new IOException(e);
+            }
+            sink.write(content);
+          }
+        };
+    UploadDataProvider provider = new RequestBodyConverter(requestBody, executor, NO_TIMEOUT);
+
+    TestUploadDataSink sink = new TestUploadDataSink();
+    ByteBuffer byteBuffer = ByteBuffer.allocateDirect(8 * 1024);
+    provider.read(sink, byteBuffer);
+
+    // read() must return immediately before writeTo() produces any data.
+    assertThat(writeStarted.await(5, SECONDS)).isTrue();
+    assertThat(sink.isDone()).isFalse();
+
+    allowWrite.countDown();
+    assertThat(sink.waitForCallback()).isFalse();
+    assertThat(sink.callbackThread.get()).isSameInstanceAs(writeThread.get());
+
+    byteBuffer.flip();
+    byte[] actual = new byte[byteBuffer.remaining()];
+    byteBuffer.get(actual);
+    assertThat(actual).isEqualTo(content);
+  }
+
+  @Test
+  public void testWriteTimeout() throws Exception {
+    CountDownLatch writeInterrupted = new CountDownLatch(1);
+    RequestBody requestBody =
+        new RequestBody() {
+          @Override
+          public MediaType contentType() {
+            return null;
+          }
+
+          @Override
+          public long contentLength() {
+            return 1024L;
+          }
+
+          @Override
+          public void writeTo(BufferedSink sink) {
+            try {
+              new CountDownLatch(1).await();
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+              writeInterrupted.countDown();
+            }
+          }
+        };
+    UploadDataProvider provider = new RequestBodyConverter(requestBody, executor, 100);
+
+    TestUploadDataSink sink = new TestUploadDataSink();
+    provider.read(sink, ByteBuffer.allocateDirect(8 * 1024));
+
+    ExecutionException exception = assertThrows(ExecutionException.class, sink::waitForCallback);
+    assertThat(exception).hasCauseThat().isInstanceOf(IOException.class);
+    assertThat(exception.getCause()).hasCauseThat().isInstanceOf(TimeoutException.class);
+    assertThat(writeInterrupted.await(5, SECONDS)).isTrue();
+  }
+
+  @Test
+  public void testWriteTo_throwsException() {
+    RequestBody requestBody =
+        new RequestBody() {
+          @Override
+          public MediaType contentType() {
+            return null;
+          }
+
+          @Override
+          public long contentLength() {
+            return 1024L;
+          }
+
+          @Override
+          public void writeTo(BufferedSink sink) throws IOException {
+            throw new IOException("Write failed!");
+          }
+        };
+    UploadDataProvider provider = new RequestBodyConverter(requestBody, executor, NO_TIMEOUT);
+
+    ExecutionException exception = assertThrows(ExecutionException.class, () -> readAll(provider));
+    assertThat(exception).hasCauseThat().isInstanceOf(IOException.class);
+    assertThat(exception).hasCauseThat().hasMessageThat().isEqualTo("Write failed!");
   }
 
   private static void rewind(UploadDataProvider uploadDataProvider) throws Exception {
@@ -265,17 +399,24 @@ public class RequestBodyConverterTest {
 
     private final SettableFuture<Boolean> result = SettableFuture.create();
     private final SettableFuture<Void> rewindResult = SettableFuture.create();
+    private final AtomicReference<Thread> callbackThread = new AtomicReference<>();
 
     @Override
     public void onReadSucceeded(boolean finalChunk) {
+      callbackThread.set(Thread.currentThread());
       result.set(finalChunk);
       rewindResult.setException(new AssertionError("Unexpected onReadSucceeded"));
     }
 
     @Override
     public void onReadError(Exception exception) {
+      callbackThread.set(Thread.currentThread());
       result.setException(exception);
       rewindResult.setException(new AssertionError("Unexpected onReadError", exception));
+    }
+
+    private boolean isDone() {
+      return result.isDone();
     }
 
     /**
