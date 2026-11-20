@@ -22,8 +22,6 @@ import static com.google.common.base.Preconditions.checkState;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 import android.util.Log;
-import com.google.common.util.concurrent.FutureCallback;
-import com.google.common.util.concurrent.Futures;
 import com.google.net.cronet.okhttptransport.RequestResponseConverter.CronetRequestAndOkHttpResponse;
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
@@ -149,33 +147,29 @@ public final class CronetCallFactory implements Call.Factory {
         convertedRequestAndResponse.set(requestAndOkHttpResponse);
         CronetCall call = this;
 
-        Futures.addCallback(
-            requestAndOkHttpResponse.getResponseAsync(),
-            new FutureCallback<Response>() {
-              @Override
-              public void onSuccess(Response result) {
-                try {
-                  responseCallback.onResponse(call, toCronetCallFactoryResponse(call, result));
-                } catch (IOException e) {
-                  // The call factory doesn't really mind this - the application code
-                  // threw an exception while handling the response, they should have taken care
-                  // of it. Just logging the error is consistent with plain OkHttp implementation.
-                  Log.i(TAG, "Callback failure for " + toLoggableString(), e);
-                }
-              }
-
-              @Override
-              public void onFailure(Throwable t) {
-                if (t instanceof IOException) {
-                  responseCallback.onFailure(call, (IOException) t);
-                } else {
-                  responseCallback.onFailure(call, new IOException(t));
-                }
-              }
-            },
-            responseCallbackExecutor);
-
         startRequestIfNotCanceled();
+
+        responseCallbackExecutor.execute(
+            () -> {
+              Response response;
+              try {
+                response = requestAndOkHttpResponse.getResponse();
+              } catch (IOException e) {
+                responseCallback.onFailure(call, e);
+                return;
+              } catch (Throwable t) {
+                responseCallback.onFailure(call, new IOException(t));
+                return;
+              }
+              try {
+                responseCallback.onResponse(call, toCronetCallFactoryResponse(call, response));
+              } catch (IOException e) {
+                // The call factory doesn't really mind this - the application code
+                // threw an exception while handling the response, they should have taken care
+                // of it. Just logging the error is consistent with plain OkHttp implementation.
+                Log.i(TAG, "Callback failure for " + toLoggableString(), e);
+              }
+            });
       } catch (IOException e) {
         // If the request finished successfully don't exit the timeout yet. Reading the body also
         // needs to be considered and the body object will take care of exiting it. See

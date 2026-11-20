@@ -17,8 +17,8 @@
 package com.google.net.cronet.okhttptransport;
 
 import android.util.Log;
-import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
+import com.google.net.cronet.okhttptransport.OkHttpBridgeRequestCallback.ResponseHeaders;
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
 import okhttp3.MediaType;
@@ -125,30 +125,26 @@ final class RequestResponseConverter {
       }
     }
 
+    UrlRequest urlRequest = builder.build();
     return new CronetRequestAndOkHttpResponse(
-        builder.build(), createResponseSupplier(okHttpRequest, callback));
+        urlRequest, createResponseSupplier(okHttpRequest, urlRequest, callback));
   }
 
   private ResponseSupplier createResponseSupplier(
-      Request request, OkHttpBridgeRequestCallback callback) {
-    return new ResponseSupplier() {
-      @Override
-      public Response getResponse() throws IOException {
-        return responseConverter.toResponse(request, callback);
-      }
-
-      @Override
-      public ListenableFuture<Response> getResponseFuture() {
-        return responseConverter.toResponseAsync(request, callback);
-      }
+      Request request, UrlRequest urlRequest, OkHttpBridgeRequestCallback callback) {
+    return () -> {
+      ResponseHeaders responseHeaders = callback.waitForResponseHeaders(urlRequest);
+      return responseConverter.toResponse(
+          request,
+          responseHeaders.info,
+          responseHeaders.bodySource,
+          callback.getUrlResponseInfoChain());
     };
   }
 
   /** A {@link Future} like holder for OkHttp's {@link Response}. */
   private interface ResponseSupplier {
     Response getResponse() throws IOException;
-
-    ListenableFuture<Response> getResponseFuture();
   }
 
   /** A simple data class for bundling Cronet request and OkHttp response. */
@@ -167,10 +163,6 @@ final class RequestResponseConverter {
 
     public Response getResponse() throws IOException {
       return responseSupplier.getResponse();
-    }
-
-    public ListenableFuture<Response> getResponseAsync() {
-      return responseSupplier.getResponseFuture();
     }
   }
 }

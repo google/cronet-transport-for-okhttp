@@ -25,8 +25,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimaps;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableFuture;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -52,17 +50,16 @@ public class ResponseConverterTest {
   private static final MediaType GOOGLE_COM_MEDIA_TYPE =
       MediaType.parse("text/html; charset=UTF-8");
 
-  // TODO: Separate the getters to an interface and make OkHttpBridgeRequestCallback final
-  private OkHttpBridgeRequestCallback mockRequestCallback;
-
   private final ResponseConverter underTest = new ResponseConverter();
 
   @Test
   public void testAllFields_success() throws Exception {
-    mockRequestCallback =
-        createMockCallback(new GoogleComResponseInfo(), createGoogleComBodySource());
-
-    Response actualResponse = underTest.toResponse(GOOGLE_COM_REQUEST, mockRequestCallback);
+    Response actualResponse =
+        underTest.toResponse(
+            GOOGLE_COM_REQUEST,
+            new GoogleComResponseInfo(),
+            createGoogleComBodySource(),
+            ImmutableList.of());
 
     assertThat(actualResponse.code()).isEqualTo(200);
     assertThat(actualResponse.message()).isEmpty();
@@ -92,10 +89,9 @@ public class ResponseConverterTest {
           }
         };
 
-    mockRequestCallback =
-        createMockCallback(responseInfo, createGoogleComBodySource());
-
-    Response actualResponse = underTest.toResponse(GOOGLE_COM_REQUEST, mockRequestCallback);
+    Response actualResponse =
+        underTest.toResponse(
+            GOOGLE_COM_REQUEST, responseInfo, createGoogleComBodySource(), ImmutableList.of());
 
     assertThat(actualResponse.body().contentLength()).isEqualTo(-1);
     assertThat(actualResponse.body().contentType()).isEqualTo(MediaType.parse(contentTypeHeader));
@@ -113,10 +109,9 @@ public class ResponseConverterTest {
           }
         };
 
-    mockRequestCallback =
-        createMockCallback(responseInfo, createGoogleComBodySource());
-
-    Response actualResponse = underTest.toResponse(GOOGLE_COM_REQUEST, mockRequestCallback);
+    Response actualResponse =
+        underTest.toResponse(
+            GOOGLE_COM_REQUEST, responseInfo, createGoogleComBodySource(), ImmutableList.of());
 
     assertThat(actualResponse.body().contentLength()).isEqualTo(-1);
 
@@ -134,9 +129,9 @@ public class ResponseConverterTest {
           }
         };
 
-    mockRequestCallback = createMockCallback(responseInfo, createGoogleComBodySource());
-
-    Response actualResponse = underTest.toResponse(GOOGLE_COM_REQUEST, mockRequestCallback);
+    Response actualResponse =
+        underTest.toResponse(
+            GOOGLE_COM_REQUEST, responseInfo, createGoogleComBodySource(), ImmutableList.of());
 
     assertThat(actualResponse.body().contentLength()).isEqualTo(-1);
 
@@ -153,9 +148,9 @@ public class ResponseConverterTest {
           }
         };
 
-    mockRequestCallback = createMockCallback(responseInfo, createGoogleComBodySource());
-
-    Response actualResponse = underTest.toResponse(GOOGLE_COM_REQUEST, mockRequestCallback);
+    Response actualResponse =
+        underTest.toResponse(
+            GOOGLE_COM_REQUEST, responseInfo, createGoogleComBodySource(), ImmutableList.of());
     assertThat(actualResponse.body().contentType()).isNull();
     assertThat(actualResponse.body().string()).isEqualTo(GOOGLE_COM_BODY);
   }
@@ -170,9 +165,9 @@ public class ResponseConverterTest {
           }
         };
 
-    mockRequestCallback = createMockCallback(responseInfo, createGoogleComBodySource());
-
-    Response actualResponse = underTest.toResponse(GOOGLE_COM_REQUEST, mockRequestCallback);
+    Response actualResponse =
+        underTest.toResponse(
+            GOOGLE_COM_REQUEST, responseInfo, createGoogleComBodySource(), ImmutableList.of());
     assertThat(actualResponse.protocol()).isEqualTo(Protocol.HTTP_1_0);
     assertThat(actualResponse.body().string()).isEqualTo(GOOGLE_COM_BODY);
   }
@@ -253,23 +248,5 @@ public class ResponseConverterTest {
     public long getReceivedByteCount() {
       return 400;
     }
-  }
-
-  private static OkHttpBridgeRequestCallback createMockCallback(
-      UrlResponseInfo responseInfo, Source bodySource) {
-    ListenableFuture<UrlResponseInfo> responseInfoFuture = Futures.immediateFuture(responseInfo);
-    ListenableFuture<Source> bodySourceFuture = Futures.immediateFuture(bodySource);
-
-    return new OkHttpBridgeRequestCallback(0, RedirectStrategy.defaultStrategy()) {
-      @Override
-      ListenableFuture<UrlResponseInfo> getUrlResponseInfo() {
-        return responseInfoFuture;
-      }
-
-      @Override
-      ListenableFuture<Source> getBodySource() {
-        return bodySourceFuture;
-      }
-    };
   }
 }

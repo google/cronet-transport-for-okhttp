@@ -24,18 +24,12 @@ import com.google.common.base.Ascii;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.MoreExecutors;
-import com.google.common.util.concurrent.Uninterruptibles;
 import java.io.IOException;
 import java.net.ProtocolException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
 import javax.annotation.Nullable;
 import okhttp3.MediaType;
 import okhttp3.Protocol;
@@ -62,18 +56,19 @@ final class ResponseConverter {
   private static final Splitter COMMA_SPLITTER = Splitter.on(',').trimResults().omitEmptyStrings();
 
   /**
-   * Creates an OkHttp's Response from the OkHttp-Cronet bridging callback.
+   * Creates an OkHttp's Response from the Cronet {@link UrlResponseInfo} and body {@link Source}.
    *
-   * <p>As long as the callback's {@code UrlResponseInfo} is available this method is non-blocking.
-   * However, this method doesn't fetch the entire body response. As a result, subsequent calls to
-   * the result's {@link Response#body()} methods might block further.
+   * <p>This method doesn't fetch the entire body response. As a result, subsequent calls to the
+   * result's {@link Response#body()} methods might block further.
    */
-  Response toResponse(Request request, OkHttpBridgeRequestCallback callback) throws IOException {
-    UrlResponseInfo cronetResponseInfo = getFutureValue(callback.getUrlResponseInfo());
-    Response.Builder responseBuilder =
-        createResponse(request, cronetResponseInfo, getFutureValue(callback.getBodySource()));
+  Response toResponse(
+      Request request,
+      UrlResponseInfo cronetResponseInfo,
+      Source bodySource,
+      List<UrlResponseInfo> redirectResponseInfos)
+      throws IOException {
+    Response.Builder responseBuilder = createResponse(request, cronetResponseInfo, bodySource);
 
-    List<UrlResponseInfo> redirectResponseInfos = callback.getUrlResponseInfoChain();
     List<String> urlChain = cronetResponseInfo.getUrlChain();
 
     if (!redirectResponseInfos.isEmpty()) {
@@ -96,12 +91,6 @@ final class ResponseConverter {
     }
 
     return responseBuilder.build();
-  }
-
-  ListenableFuture<Response> toResponseAsync(
-      Request request, OkHttpBridgeRequestCallback callback) {
-    return Futures.whenAllComplete(callback.getUrlResponseInfo(), callback.getBodySource())
-        .call(() -> toResponse(request, callback), MoreExecutors.directExecutor());
   }
 
   private static Response.Builder createResponse(
@@ -248,14 +237,6 @@ final class ResponseConverter {
       return null;
     }
     return Iterables.getLast(headers);
-  }
-
-  private static <T> T getFutureValue(Future<T> future) throws IOException {
-    try {
-      return Uninterruptibles.getUninterruptibly(future);
-    } catch (ExecutionException e) {
-      throw new IOException(e);
-    }
   }
 
   private static <K, V> V getOrDefault(Map<K, V> map, K key, @NonNull V defaultValue) {
