@@ -1221,26 +1221,59 @@ public abstract class CallTest {
 
   @Test
   public void cancelBeforePostRequestBodyIsSent() throws Exception {
-    server.enqueue(new MockResponse().throttleBody(1, 750, MILLISECONDS));
-
+    server.enqueue(new MockResponse());
+    RequestBody requestBody = RequestBody.create(MediaType.get("text/plain"), "def");
+    CountDownLatch requestInFlight = new CountDownLatch(1);
+    CountDownLatch callCanceled = new CountDownLatch(1);
     final Call call =
         underTest.newCall(
             new Request.Builder()
-                .post(RequestBody.create(MediaType.get("text/plain"), "def"))
+                .post(
+                    new RequestBody() {
+                      @Override
+                      @Nullable
+                      public MediaType contentType() {
+                        return requestBody.contentType();
+                      }
+
+                      @Override
+                      public long contentLength() throws IOException {
+                        return requestBody.contentLength();
+                      }
+
+                      @Override
+                      public void writeTo(BufferedSink sink) throws IOException {
+                        requestInFlight.countDown();
+                        try {
+                          assertThat(callCanceled.await(10, SECONDS)).isTrue();
+                        } catch (InterruptedException e) {
+                          Thread.currentThread().interrupt();
+                          throw new IOException(e);
+                        }
+                        requestBody.writeTo(sink);
+                      }
+                    })
                 .url(server.url("/a"))
                 .build());
     ExecutorService executor = Executors.newSingleThreadExecutor();
     Future<Response> result = executor.submit(call::execute);
+    // The request headers were sent before the body was held back, so MockWebServer records a
+    // truncated request with an I/O failure and an empty body once Cronet's cancellation poller
+    // aborts the in-flight socket on the wire. Wait for that before unblocking writeTo() so this
+    // test does not deadlock when writeTo() runs on the call.execute() thread.
+    RecordedRequest recordedRequest;
+    try {
+      assertThat(requestInFlight.await(10, SECONDS)).isTrue();
+      call.cancel();
+      recordedRequest = server.takeRequest();
+    } finally {
+      callCanceled.countDown();
+    }
+    assertThat(recordedRequest.getFailure()).isNotNull();
+    assertThat(recordedRequest.getBodySize()).isEqualTo(0);
 
-    Thread.sleep(100); // wait for it to go in flight.
-
-    call.cancel();
     ExecutionException exception = assertThrows(ExecutionException.class, result::get);
-
     assertThat(exception).hasCauseThat().hasMessageThat().contains("canceled");
-
-    // The request is canceled before being fully read by the server. Such requests aren't counted.
-    assertThat(server.getRequestCount()).isEqualTo(0);
   }
 
   @Test
