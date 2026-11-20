@@ -55,6 +55,7 @@ import org.chromium.net.UploadDataSink;
  */
 final class RequestBodyConverter extends UploadDataProvider {
   private final RequestBody okHttpRequestBody;
+  private final long contentLength;
   private volatile UploadBodyDataBroker broker = new UploadBodyDataBroker();
   private final ListeningExecutorService readTaskExecutor;
   private final int writeTimeoutMillis;
@@ -67,10 +68,12 @@ final class RequestBodyConverter extends UploadDataProvider {
 
   RequestBodyConverter(
       RequestBody okHttpRequestBody,
+      long contentLength,
       ExecutorService readTaskExecutor,
       int writeTimeoutMillis) {
     checkArgument(writeTimeoutMillis >= 0);
     this.okHttpRequestBody = okHttpRequestBody;
+    this.contentLength = contentLength;
     if (readTaskExecutor instanceof ListeningExecutorService) {
       this.readTaskExecutor = (ListeningExecutorService) readTaskExecutor;
     } else {
@@ -80,19 +83,18 @@ final class RequestBodyConverter extends UploadDataProvider {
   }
 
   @Override
-  public long getLength() throws IOException {
-    return okHttpRequestBody.contentLength();
+  public long getLength() {
+    return contentLength;
   }
 
   @Override
   public void read(UploadDataSink uploadDataSink, ByteBuffer byteBuffer) throws IOException {
     ensureReadTaskStarted();
 
-    long expectedLength = getLength();
-    if (expectedLength == -1) {
+    if (contentLength == -1) {
       readUnknownBodyLength(uploadDataSink, byteBuffer);
     } else {
-      readKnownBodyLength(uploadDataSink, byteBuffer, expectedLength);
+      readKnownBodyLength(uploadDataSink, byteBuffer, contentLength);
     }
   }
 

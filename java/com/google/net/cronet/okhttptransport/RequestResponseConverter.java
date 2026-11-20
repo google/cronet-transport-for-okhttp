@@ -91,17 +91,18 @@ final class RequestResponseConverter {
 
     RequestBody body = okHttpRequest.body();
     if (body != null) {
+      long contentLength = body.contentLength();
       // If provided by the user, set the RequestBody.contentType(). This matches OkHttp behavior.
       MediaType contentType = body.contentType();
       if (contentType != null) {
         builder.addHeader(CONTENT_TYPE_HEADER_NAME, contentType.toString());
       }
 
-      if (okHttpRequest.header(CONTENT_LENGTH_HEADER_NAME) == null && body.contentLength() != -1) {
-        builder.addHeader(CONTENT_LENGTH_HEADER_NAME, String.valueOf(body.contentLength()));
+      if (okHttpRequest.header(CONTENT_LENGTH_HEADER_NAME) == null && contentLength != -1) {
+        builder.addHeader(CONTENT_LENGTH_HEADER_NAME, String.valueOf(contentLength));
       }
 
-      if (body.contentLength() != 0) {
+      if (contentLength != 0) {
         // If UploadDataProvider is set, Cronet requires a non-empty Content-Type header.
         String contentTypeHeader = okHttpRequest.header(CONTENT_TYPE_HEADER_NAME);
         if (contentType == null
@@ -120,7 +121,8 @@ final class RequestResponseConverter {
         // RequestBodyConverter methods are non-blocking (reads complete asynchronously from
         // requestBodyReaderExecutor), so use a direct executor to avoid extra thread hops.
         builder.setUploadDataProvider(
-            new RequestBodyConverter(body, requestBodyReaderExecutor, writeTimeoutMillis),
+            new RequestBodyConverter(
+                body, contentLength, requestBodyReaderExecutor, writeTimeoutMillis),
             MoreExecutors.directExecutor());
       }
     }
